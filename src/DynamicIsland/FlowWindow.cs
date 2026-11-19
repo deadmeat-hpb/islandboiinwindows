@@ -21,7 +21,7 @@ namespace DynamicIsland;
 /// </summary>
 sealed class FlowWindow : Window
 {
-    const double Duration = 0.75;
+    const double Duration = 0.75; // 0.11 s gathering at the taskbar + 0.64 s flight
     readonly nint _hwnd;
     readonly CanvasControl _canvas;
     readonly Stopwatch _clock = new();
@@ -73,6 +73,7 @@ sealed class FlowWindow : Window
     {
         var origin = new Vector2(monitor.X, monitor.Y);
         (_from, _to, _color, _s) = (from - origin, to - origin, color, s);
+        _bead?.Dispose(); _halo?.Dispose(); (_bead, _halo) = (null, null); // rebuilt in the new colour on the first frame
         AppWindow.MoveAndResize(monitor);
         AppWindow.Show(false); // don't take focus from the app
         Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
@@ -93,39 +94,104 @@ sealed class FlowWindow : Window
         Arrived?.Invoke();
     }
 
-    /// <summary>Upward arc: leaves the taskbar straight up, then bends over to the island.</summary>
+    /// <summary>
+    /// Cubic arc from the taskbar button to the island: rises off the taskbar, bows a little to the side, and drops into
+    /// the island from straight below.
+    /// </summary>
     Vector2 At(float t)
     {
-        var c = new Vector2(_from.X, _to.Y + (_from.Y - _to.Y) * 0.25f);
+        float dy = _from.Y - _to.Y, dx = _to.X - _from.X;
+        float bow = (MathF.Abs(dx) * 0.10f + 40 * _s) * (dx >= 0 ? -1 : 1); // bow away from the direction of travel
+        var p1 = new Vector2(_from.X + bow, _from.Y - dy * 0.45f);
+        var p2 = new Vector2(_to.X, _to.Y + dy * 0.40f);
         float u = 1 - t;
-        return u * u * _from + 2 * u * t * c + t * t * _to;
+        return u * u * u * _from + 3 * u * u * t * p1 + 3 * u * t * t * p2 + t * t * t * _to;
     }
 
     static Color Alpha(Color c, float a) => Color.FromArgb((byte)Math.Clamp(a * 255, 0, 255), c.R, c.G, c.B);
 
+    const float Gather = 0.11f; // seconds the bead swells at the taskbar button before it leaves
+    CanvasRadialGradientBrush? _bead, _halo; // created once per device; only centre/radius/opacity change per frame
+
     void Draw(CanvasDrawingSession ds)
     {
         ds.Transform = Matrix3x2.CreateScale(1 / _s); // our math is in physical pixels
-        float t = (float)Math.Min(_clock.Elapsed.TotalSeconds / Duration, 1);
-        static float Ease(float x) => x < 0.5f ? 4 * x * x * x : 1 - MathF.Pow(-2 * x + 2, 3) / 2;
-        float head = Ease(t), fade = MathF.Min(1, (1 - t) * 6); // fades as it sinks into the island
-
-        // Liquid tail: tapering, fading segments trailing the head.
-        using var round = new CanvasStrokeStyle { StartCap = CanvasCapStyle.Round, EndCap = CanvasCapStyle.Round };
-        const int n = 16;
-        for (int i = n; i > 0; i--)
+        float time = (float)_clock.Elapsed.TotalSeconds;
+        if (_bead is null || _bead.Device != ds.Device)
         {
-            float a = MathF.Max(0, head - i * 0.022f), b = MathF.Max(0, head - (i - 1) * 0.022f);
-            float k = 1 - i / (float)n;
-            ds.DrawLine(At(a), At(b), Alpha(_color, 0.55f * k * k * fade), (3 + 9 * k) * _s, round);
+            _bead?.Dispose(); _halo?.Dispose();
+            // Near-white core, album colour around it, fading out: reads as light, not paint.
+            _bead = new CanvasRadialGradientBrush(ds,
+            [
+                new() { Position = 0f, Color = Color.FromArgb(255, 255, 255, 255) },
+                new() { Position = 0.35f, Color = Alpha(_color, 0.85f) },
+                new() { Position = 1f, Color = Alpha(_color, 0) },
+            ]);
+            _halo = new CanvasRadialGradientBrush(ds, Alpha(_color, 0.22f), Alpha(_color, 0));
         }
 
-        // Glowing drop at the head.
-        var p = At(head);
-        float r = 22 * _s;
-        using var glow = new CanvasRadialGradientBrush(ds, Alpha(_color, 0.5f * fade), Alpha(_color, 0)) { Center = p, RadiusX = r, RadiusY = r };
-        ds.FillCircle(p, r, glow);
-        ds.FillCircle(p, 6 * _s, Alpha(Colors.White, 0.9f * fade));
+        // Departure: a soft bead gathers at the taskbar button, which brightens faintly, then dims as the light leaves.
+        float gather = Math.Clamp(time / Gather, 0, 1);
+        float haloA = time < Gather ? gather : MathF.Max(0, 1 - (time - Gather) / 0.25f);
+        if (haloA > 0)
+        {
+            _halo!.Center = _from; _halo.RadiusX = _halo.RadiusY = 30 * _s; _halo.Opacity = haloA;
+            ds.FillCircle(_from, 30 * _s, _halo);
+        }
+
+        float flight = (float)Duration - Gather;
+        float u = Math.Clamp((time - Gather) / flight, 0, 1);
+        if (time < Gather) { Blob(ds, _from, Vector2.UnitY, 0, 7 * _s * gather, 1); return; }
+
+        // Ease in-out that keeps accelerating into the island.
+        static float Ease(float x) => 0.5f * (x * x * (3 - 2 * x)) + 0.5f * MathF.Pow(x, 2.2f);
+        float e = Ease(u);
+        var p = At(e);
+        var dir = At(MathF.Min(1, e + 0.01f)) - p;
+        dir = dir.LengthSquared() > 0 ? Vector2.Normalize(dir) : -Vector2.UnitY;
+        float speed = (Ease(MathF.Min(1, u + 0.02f)) - e) / 0.02f; // ~0..2: how fast it moves along the path right now
+
+        // Last 12 %: the drop merges into the bar, flattening into it instead of overlapping.
+        float merge = Math.Clamp((u - 0.88f) / 0.12f, 0, 1);
+        float r = 7 * _s * (1 - 0.6f * merge);
+
+        // Tapered tail: a few decreasing soft circles behind the head (no blur).
+        for (int i = 7; i >= 1; i--)
+        {
+            float k = i / 8f;
+            var q = At(MathF.Max(0, e - k * 0.09f));
+            float a = (1 - k) * (1 - k) * 0.55f * (1 - merge);
+            if (a <= 0.01f) continue;
+            Blob(ds, q, dir, 0, r * (1 - 0.75f * k), a);
+        }
+
+        // Tiny sparks shed along the way: drift outward and fade within a quarter second.
+        for (int i = 0; i < 6; i++)
+        {
+            float born = 0.15f + i * 0.12f, age = (u - born) * flight;
+            if (age <= 0 || age > 0.25f) continue;
+            var at = At(Ease(born));
+            float side = (i % 2 == 0 ? 1 : -1) * (6 + 3 * i) * _s;
+            var drift = new Vector2(-dir.Y, dir.X) * side * (age / 0.25f) + new Vector2(0, 10 * _s * age / 0.25f);
+            ds.FillCircle(at + drift, 1.3f * _s, Alpha(i % 3 == 0 ? Colors.White : _color, 0.6f * (1 - age / 0.25f)));
+        }
+
+        // The droplet: stretched along its velocity, squashed sideways when it lands.
+        float stretch = Math.Clamp(speed * 0.6f, 0, 1.3f) * (1 - merge);
+        Blob(ds, p, merge > 0 ? Vector2.UnitX : dir, stretch - 0.5f * merge, r, 1);
+    }
+
+    /// <summary>A soft light droplet at <paramref name="c"/>, stretched by <paramref name="stretch"/> along <paramref name="dir"/>.</summary>
+    void Blob(CanvasDrawingSession ds, Vector2 c, Vector2 dir, float stretch, float r, float opacity)
+    {
+        if (r <= 0.1f || opacity <= 0) return;
+        float halo = r * 2.6f; // the bright core is ~1/3 of the soft disc
+        var old = ds.Transform;
+        float angle = MathF.Atan2(dir.Y, dir.X);
+        ds.Transform = Matrix3x2.CreateScale(1 + stretch, 1 / (1 + 0.5f * stretch)) * Matrix3x2.CreateRotation(angle) * Matrix3x2.CreateTranslation(c) * old;
+        _bead!.Center = Vector2.Zero; _bead.RadiusX = _bead.RadiusY = halo; _bead.Opacity = opacity;
+        ds.FillCircle(Vector2.Zero, halo, _bead);
+        ds.Transform = old;
     }
 
     /// <summary>Centre of the app's taskbar button (Windows 11 names them "App name - 1 running window"), or null.</summary>

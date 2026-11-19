@@ -155,7 +155,7 @@ public sealed class IslandWindow : Window
             };
         }
         var a = _media.Accent;
-        var color = Microsoft.UI.ColorHelper.FromArgb(255, (byte)((255 + a.R) / 2), (byte)((255 + a.G) / 2), (byte)((255 + a.B) / 2));
+        var color = a; // album colour (already softened), same as the pill's inner light; the drop's core is near-white
         _flow.Play(new RectInt32(_monLeft, _monTop, _monW, _monH), _dpi, from, to, color);
     }
 
@@ -538,7 +538,9 @@ public sealed class IslandWindow : Window
             _ => _media.HasSession ? glow : cool, // album colour, blended during the song slide
         };
         float washStrength = _mode is Mode.Idle or Mode.Hover ? 0 : Math.Clamp((_h.Value - 16 * _s) / (14 * _s), 0, 1); // grows in with the pill
-        glowStrength = MathF.Max(glowStrength, 0.6f * MathF.Max(0, 1 - (float)(clock - _pulseAt) / 0.7f)); // faint light as the flow lands
+        float landed = MathF.Max(0, 1 - (float)(clock - _pulseAt) / 0.6f); // 1 at the flow's impact, 0 after 0.6 s
+        washStrength *= 1 + 0.5f * landed; // the inner light brightens a touch at the flow's impact, then settles
+        glowStrength = MathF.Max(glowStrength, 0.25f * landed); // barely-there light spilling as the flow lands
         // Melting: the bottom drips down while the card grows. Not for the pill: there the drop read as a second pill popping out underneath.
         float sag = _mode is Mode.Expanded or Mode.Notify ? Math.Clamp(_h.Velocity * 0.012f, 0, 20 * _s) : 0;
         float reach = (float)Math.Clamp((clock - _reachAt) / 0.25, 0, 1);
