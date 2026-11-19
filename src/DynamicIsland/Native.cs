@@ -32,6 +32,10 @@ static class Native
     [DllImport("user32.dll", EntryPoint = "GetMonitorInfoW")] public static extern bool GetMonitorInfo(nint hmon, ref MONITORINFO mi);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(nint hwnd);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern int RegisterApplicationRestart(string? args, uint flags); // relaunch after a crash or hang
+    public const nint WS_EX_LAYERED = 0x80000, WS_EX_TRANSPARENT = 0x20;
+    public const uint LWA_ALPHA = 0x2;
+    [DllImport("user32.dll")] public static extern bool SetLayeredWindowAttributes(nint hwnd, uint key, byte alpha, uint flags);
+    [DllImport("user32.dll", EntryPoint = "FindWindowW", CharSet = CharSet.Unicode)] public static extern nint FindWindow(string? cls, string? title);
     public delegate bool EnumWindowsProc(nint hwnd, nint lParam);
     [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc proc, nint lParam);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(nint hwnd);

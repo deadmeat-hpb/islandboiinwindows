@@ -48,7 +48,10 @@ public sealed class IslandWindow : Window
     ScreenCapture? _capture;
 
     nint _monitor;
-    int _monLeft, _monTop, _monW, _stripH;
+    int _monLeft, _monTop, _monW, _monH, _stripH;
+    FlowWindow? _flow;
+    bool _wasPlaying;
+    double _pulseAt = -10;
     float _s = 1; // physical px per DIP; all island math is in physical px
 
     Mode _mode = Mode.Idle;
@@ -81,6 +84,8 @@ public sealed class IslandWindow : Window
         _media.Changed += () =>
         {
             if (_mode == Mode.Expanded) SetMode(Mode.Expanded); // card size depends on whether anything is playing
+            if (_media.Playing && !_wasPlaying && _clock.Elapsed.TotalSeconds > 3 && !_hiddenForFullscreen) FlowIn(); // not for music already playing at launch
+            _wasPlaying = _media.Playing;
             _dirty = true;
         };
         _media.Start();
@@ -114,6 +119,23 @@ public sealed class IslandWindow : Window
         Closed += (_, _) => { _slowTick.Stop(); SetFast(false); _capture?.Dispose(); };
     }
 
+    /// <summary>Media just started: light flows from the app's taskbar button into the island, which glows as it lands.</summary>
+    async void FlowIn()
+    {
+        var (cx, top, _, h) = Shape();
+        var to = new System.Numerics.Vector2(_monLeft + cx, _monTop + top + h / 2);
+        var from = await Task.Run(() => FlowWindow.TaskbarButton(_media.AppName())) // UI Automation into the taskbar: keep it off the UI thread
+            ?? new System.Numerics.Vector2(_monLeft + _monW / 2f, _monTop + _monH - 24 * _s);
+        if (_flow is null)
+        {
+            _flow = new FlowWindow();
+            _flow.Arrived += () => { _pulseAt = _clock.Elapsed.TotalSeconds; _w.Velocity += 500 * _s; _dirty = true; }; // a little gulp + glow
+        }
+        var a = _media.Accent;
+        var color = Microsoft.UI.ColorHelper.FromArgb(255, (byte)((255 + a.R) / 2), (byte)((255 + a.G) / 2), (byte)((255 + a.B) / 2));
+        _flow.Play(new RectInt32(_monLeft, _monTop, _monW, _monH), _s, from, to, color);
+    }
+
     void SetupWindow()
     {
         var p = OverlappedPresenter.Create();
@@ -138,7 +160,7 @@ public sealed class IslandWindow : Window
         _monitor = Native.MonitorFromPoint(default, 1 /* MONITOR_DEFAULTTOPRIMARY */);
         var mi = new Native.MONITORINFO { cbSize = Marshal.SizeOf<Native.MONITORINFO>() };
         Native.GetMonitorInfo(_monitor, ref mi);
-        (_monLeft, _monTop, _monW) = (mi.rcMonitor.Left, mi.rcMonitor.Top, mi.rcMonitor.Right - mi.rcMonitor.Left);
+        (_monLeft, _monTop, _monW, _monH) = (mi.rcMonitor.Left, mi.rcMonitor.Top, mi.rcMonitor.Right - mi.rcMonitor.Left, mi.rcMonitor.Bottom - mi.rcMonitor.Top);
 
         AppWindow.Move(new PointInt32(_monLeft, _monTop)); // move first so we read this monitor's DPI
         _s = Native.GetDpiForWindow(_hwnd) / 96f;
@@ -200,7 +222,7 @@ public sealed class IslandWindow : Window
         if ((Native.GetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE) & Native.WS_EX_TOPMOST) == 0) // the shell can drop us out of the topmost band; then clicks hit the window below
             Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
         UpdateHover(now);
-        bool animating = _pressed || _media.TransitionT < 1 || _media.ArtFadeT < 1 || !(_x.Settled && _w.Settled && _h.Settled && _top.Settled);
+        bool animating = _pressed || now - _pulseAt < 0.7 || _media.TransitionT < 1 || _media.ArtFadeT < 1 || !(_x.Settled && _w.Settled && _h.Settled && _top.Settled);
         SetFast(animating);
 
         // Background refraction only refreshes at the slow tick rate when idle, and freezes in battery saver.
@@ -433,6 +455,7 @@ public sealed class IslandWindow : Window
         var a = _media.PrevAccent; var b = _media.Accent;
         var glow = Microsoft.UI.ColorHelper.FromArgb(255, (byte)(a.R + (b.R - a.R) * t), (byte)(a.G + (b.G - a.G) * t), (byte)(a.B + (b.B - a.B) * t));
         float glowStrength = _media.Playing && _mode is Mode.Compact or Mode.Expanded ? 1 : 0; // steady and faint: a pulse read as gimmicky
+        glowStrength = MathF.Max(glowStrength, 2f * MathF.Max(0, 1 - (float)(_clock.Elapsed.TotalSeconds - _pulseAt) / 0.7f)); // brief light as the flow lands
         float sag = Math.Clamp(_h.Velocity * 0.012f, 0, 20 * _s); // melting: the bottom drips down while the island grows
         Glass.Draw(ds, _capture?.Image, _canvasLeftPx, cx, top, w, h, _s, expand, glow, glowStrength, sag, rect =>
         {

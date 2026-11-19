@@ -197,6 +197,23 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
     }
 
     /// <summary>A packaged app's AppUserModelId ("Family!App"), or null for plain desktop processes and ones we can't open.</summary>
+    /// <summary>The playing app's display name ("Google Chrome", "TIDAL"), as its taskbar button is labelled. Slow-ish: call off the UI thread.</summary>
+    public string? AppName()
+    {
+        string? id = _session?.SourceAppUserModelId;
+        if (string.IsNullOrEmpty(id)) return null;
+        var window = FindWindow(id, Title);
+        if (window == 0) return null;
+        Native.GetWindowThreadProcessId(window, out uint pid);
+        try
+        {
+            using var p = Process.GetProcessById((int)pid);
+            string? name = p.MainModule?.FileVersionInfo.FileDescription;
+            return string.IsNullOrWhiteSpace(name) ? p.ProcessName : name;
+        }
+        catch { return null; }
+    }
+
     /// <summary>The playing app's visible window: one titled with the media first, then any window of that app.</summary>
     static nint FindWindow(string id, string title)
     {

@@ -23,5 +23,6 @@
     <PackageReference Include="WinUIEx" Version="2.5.0" />
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
     <PackageReference Include="System.Management" Version="8.0.0" />
+    <PackageReference Include="FlaUI.UIA3" Version="4.0.0" /> <!-- finds the playing app's taskbar button -->
   </ItemGroup>
 </Project>
