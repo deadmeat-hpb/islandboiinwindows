@@ -93,9 +93,9 @@ public sealed class IslandWindow : Window
         hud.Start();
 
         _x = new Spring(LoadPosition() * _monW, 520, 34); // stiff-ish follow: lags a little behind the cursor while dragging
-        _w = new Spring(0, 300, 20);                       // bouncy shape springs
-        _h = new Spring(0, 300, 20);
-        _top = new Spring(0, 300, 22);
+        _w = new Spring(0, 300, 20);                       // width keeps a little bounce
+        _h = new Spring(0, 380, 36);                       // height barely overshoots: a bouncing bottom edge clips the card's buttons
+        _top = new Spring(0, 380, 36);
         SetMode(Mode.Idle);
         UpdateRegion();
 
