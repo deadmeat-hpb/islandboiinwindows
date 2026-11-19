@@ -57,6 +57,21 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
         }
     }
 
+    /// <summary>The synced lyric lines of the current song (empty when there are none).</summary>
+    public IReadOnlyList<(TimeSpan At, string Text)> Lyrics => _lyrics;
+
+    /// <summary>Index into <see cref="Lyrics"/> of the line for the current position, -1 before the first.</summary>
+    public int LyricIndex
+    {
+        get
+        {
+            var pos = Position;
+            int i = -1;
+            for (int k = 0; k < _lyrics.Count && _lyrics[k].At <= pos; k++) i = k;
+            return i;
+        }
+    }
+
     public double Progress
     {
         get

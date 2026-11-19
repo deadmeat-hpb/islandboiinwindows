@@ -73,8 +73,12 @@ static class MediaView
         }
 
         // Title + artist take the left half when there's a lyric; the synced line sits in the right half, beside them.
-        string lyric = m.CurrentLyric;
-        float textW = w - 118 * s, tw = lyric.Length > 0 ? textW * 0.5f : textW;
+        // Lyrics arrive: the title block narrows (and starts scrolling if it no longer fits) while the lyric list slides in
+        // from below, as one motion; reversed when they go away.
+        bool hasLyrics = m.Lyrics.Count > 0;
+        if (hasLyrics != _hadLyrics) { (_hadLyrics, _lyricsAt) = (hasLyrics, time); }
+        float lp = EaseOut((float)Math.Clamp((time - _lyricsAt) / 0.4, 0, 1)), L = hasLyrics ? lp : 1 - lp;
+        float textW = w - 118 * s, tw = textW * (1 - 0.5f * L);
         TitleScrolls = false;
         Slide(m, 28 * s, a, (dx, al, art, t, ar) =>
         {
@@ -83,15 +87,11 @@ static class MediaView
             Marquee(ds, t, new Rect(x + 98 * s + dx, y + 28 * s, tw, 24 * s), White(al), title, time, s);
             ds.DrawText(ar, new Rect(x + 98 * s + dx, y + 54 * s, tw, 20 * s), White(0.65f * al), sub);
         });
-        if (lyric.Length > 0)
+        if (L > 0.01f && (hasLyrics || _lastLyrics.Count > 0))
         {
-            using var lyricFormat = new CanvasTextFormat
-            {
-                FontFamily = Fonts.Inter(FontWeights.SemiBold), FontSize = 13 * s, FontWeight = FontWeights.SemiBold,
-                WordWrapping = CanvasWordWrapping.Wrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Word,
-                HorizontalAlignment = CanvasHorizontalAlignment.Right, VerticalAlignment = CanvasVerticalAlignment.Center,
-            };
-            ds.DrawText(lyric, new Rect(x + 98 * s + tw + 12 * s, y + 20 * s, textW - tw - 12 * s, 52 * s), White(0.9f * a), lyricFormat); // beside the title, above the progress bar
+            if (hasLyrics) _lastLyrics = m.Lyrics; // keep drawing the old list while it slides out
+            var box = new Rect(x + 98 * s + textW * 0.5f + 12 * s, y + 14 * s + (1 - L) * 18 * s, textW * 0.5f - 12 * s, 60 * s);
+            DrawLyricList(ds, box, s, _lastLyrics, hasLyrics ? m.LyricIndex : _lastIndex, time, a * L);
         }
 
         var bar = ProgressBar(r, s);
@@ -141,6 +141,50 @@ static class MediaView
             ds.DrawTextLayout(layout, (float)box.X - offset, (float)box.Y, c);
             ds.DrawTextLayout(layout, (float)box.X - offset + loop, (float)box.Y, c);
         }
+    }
+
+    static bool _hadLyrics;
+    static double _lyricsAt = -10, _scrollAt = -10;
+    static int _lastIndex = -1, _scrollFrom = -1;
+    static IReadOnlyList<(TimeSpan At, string Text)> _lastLyrics = [];
+
+    static float EaseOut(float x) => 1 - MathF.Pow(1 - x, 3);
+
+    /// <summary>True while the lyric list is sliding or scrolling, so the card keeps redrawing.</summary>
+    public static bool LyricsAnimating(double time) => time - _lyricsAt < 0.45 || time - _scrollAt < 0.35;
+
+    /// <summary>
+    /// Apple Music-style lyric list: the current line bright in the middle, the previous and next lines faded above and below.
+    /// A new line scrolls the list up over ~0.3 s; a jump (seek, new song) moves straight there.
+    /// </summary>
+    static void DrawLyricList(CanvasDrawingSession ds, Rect box, float s, IReadOnlyList<(TimeSpan At, string Text)> lines, int index, double time, float a)
+    {
+        if (index != _lastIndex)
+        {
+            (_scrollFrom, _scrollAt) = (index == _lastIndex + 1 ? _lastIndex : index, time); // only a step to the next line animates
+            _lastIndex = index;
+        }
+        float k = EaseOut((float)Math.Clamp((time - _scrollAt) / 0.3, 0, 1));
+        float pos = _scrollFrom + (index - _scrollFrom) * k; // fractional line in the middle
+
+        using var format = new CanvasTextFormat
+        {
+            FontFamily = Fonts.Inter(FontWeights.SemiBold), FontSize = 13 * s, FontWeight = FontWeights.SemiBold,
+            WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character,
+            HorizontalAlignment = CanvasHorizontalAlignment.Right, VerticalAlignment = CanvasVerticalAlignment.Center,
+        };
+        float lh = 20 * s, mid = (float)(box.Y + box.Height / 2);
+        using (ds.CreateLayer(1f, box))
+            for (int i = (int)MathF.Floor(pos) - 2; i <= (int)MathF.Ceiling(pos) + 2; i++)
+            {
+                if (i < 0 || i >= lines.Count) continue;
+                float d = i - pos, dist = MathF.Abs(d);
+                float alpha = 1 - 0.65f * MathF.Min(dist, 1);                 // neighbours faded
+                alpha *= Math.Clamp((1.9f - dist) / 0.6f, 0, 1);               // soft fade toward the top and bottom edges
+                if (alpha <= 0.01f) continue;
+                string text = lines[i].Text.Length > 0 ? lines[i].Text : "♪";
+                ds.DrawText(text, new Rect(box.X, mid + d * lh - lh / 2, box.Width, lh), White(alpha * a), format);
+            }
     }
 
     /// <summary>Where the progress bar is being dragged to (0..1), or null when it isn't.</summary>
