@@ -183,7 +183,7 @@ public sealed class IslandWindow : Window
         if ((Native.GetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE) & Native.WS_EX_TOPMOST) == 0) // the shell can drop us out of the topmost band; then clicks hit the window below
             Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
         UpdateHover(now);
-        bool animating = _pressed || !(_x.Settled && _w.Settled && _h.Settled && _top.Settled);
+        bool animating = _pressed || _media.TransitionT < 1 || !(_x.Settled && _w.Settled && _h.Settled && _top.Settled);
         SetFast(animating);
 
         // Background refraction only refreshes at the slow tick rate when idle, and freezes in battery saver.
@@ -275,7 +275,7 @@ public sealed class IslandWindow : Window
     {
         var (cx, top, w, h) = Shape();
         if (animating) (w, h) = (MathF.Max(w, _w.Target * 1.2f), MathF.Max(h, _h.Target * 1.2f)); // cover the target + overshoot up front so the region grows once
-        float pad = (_mode is Mode.Expanded or Mode.Notify ? 34 : 12) * _s;
+        float pad = (_mode is Mode.Expanded or Mode.Notify ? 34 : _mode == Mode.Compact ? 26 : 12) * _s; // compact leaves room for the album glow
         static int Snap4(float v) => (int)MathF.Round(v / 4) * 4; // fewer region updates while animating
         var region = (Math.Max(0, Snap4(cx - w / 2 - pad)), 0, Math.Min(_monW, Snap4(cx + w / 2 + pad)), Math.Min(_stripH, Snap4(top + h + pad)));
         if (animating) // only grow while moving: resizing the region every frame makes DWM stutter
@@ -380,7 +380,13 @@ public sealed class IslandWindow : Window
         var note = _mode == Mode.Notify ? _note : null;
         var hudEvent = _mode == Mode.Hud ? _hud : null;
         float hudAlpha = Math.Clamp((_w.Value - 180 * _s) / (60 * _s), 0, 1);
-        Glass.Draw(ds, _capture?.Image, _canvasLeftPx, cx, top, w, h, _s, expand, rect =>
+        // Album glow: breathes slowly while music plays, blends to the new song's colour during the slide.
+        float t = _media.TransitionT;
+        var a = _media.PrevAccent; var b = _media.Accent;
+        var glow = Microsoft.UI.ColorHelper.FromArgb(255, (byte)(a.R + (b.R - a.R) * t), (byte)(a.G + (b.G - a.G) * t), (byte)(a.B + (b.B - a.B) * t));
+        float glowStrength = _media.Playing && _mode is Mode.Compact or Mode.Expanded
+            ? 0.8f + 0.2f * MathF.Sin((float)_clock.Elapsed.TotalSeconds * 2.2f) : 0;
+        Glass.Draw(ds, _capture?.Image, _canvasLeftPx, cx, top, w, h, _s, expand, glow, glowStrength, rect =>
         {
             if (compactAlpha > 0) MediaView.DrawCompact(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, compactAlpha);
             if (expandedAlpha > 0) MediaView.DrawExpanded(ds, rect, _s, _media, expandedAlpha);

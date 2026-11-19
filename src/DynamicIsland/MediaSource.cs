@@ -22,6 +22,18 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
     public string Title { get; private set; } = "";
     public string Artist { get; private set; } = "";
     public CanvasBitmap? Art { get; private set; }
+
+    // The song before the current one, kept briefly so the views can slide it out.
+    public string PrevTitle { get; private set; } = "";
+    public string PrevArtist { get; private set; } = "";
+    public CanvasBitmap? PrevArt { get; private set; }
+    double _changedAt = double.NegativeInfinity;
+    /// <summary>0 → 1 over the song-change slide; 1 when no change is in progress.</summary>
+    public float TransitionT => (float)Math.Clamp((Environment.TickCount64 / 1000.0 - _changedAt) / 0.4, 0, 1);
+
+    /// <summary>Glow colour picked from the album art; previous song's for blending during the slide.</summary>
+    public Windows.UI.Color Accent { get; private set; } = Microsoft.UI.Colors.White;
+    public Windows.UI.Color PrevAccent { get; private set; } = Microsoft.UI.Colors.White;
     public bool Playing { get; private set; }
     public bool HasSession => _session is not null;
     public event Action? Changed;
@@ -128,11 +140,35 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
         catch (Exception ex) { Debug.WriteLine($"Couldn't read media properties: {ex}"); } // some apps publish no art or odd formats
         if (session != _session) { art?.Dispose(); return; } // a newer session took over while we awaited
 
-        Art?.Dispose();
         bool newSong = title != Title || artist != Artist;
+        if (newSong && Title.Length > 0)
+        {
+            PrevArt?.Dispose();
+            (PrevTitle, PrevArtist, PrevArt, PrevAccent) = (Title, Artist, Art, Accent);
+            _changedAt = Environment.TickCount64 / 1000.0;
+        }
+        else Art?.Dispose();
         (Title, Artist, Art) = (title, artist, art);
+        Accent = art is null ? Microsoft.UI.Colors.White : AccentOf(art);
         Changed?.Invoke();
         if (newSong) await LoadLyrics(session, title, artist);
+    }
+
+    /// <summary>The most vivid colour in the art (scaled to 8×8), brightened, so the glow reads on dark and light screens.</summary>
+    Windows.UI.Color AccentOf(CanvasBitmap art)
+    {
+        using var small = new CanvasRenderTarget(device, 8, 8, 96);
+        using (var ds = small.CreateDrawingSession()) ds.DrawImage(art, new Windows.Foundation.Rect(0, 0, 8, 8), art.Bounds);
+        var best = Microsoft.UI.Colors.White;
+        float bestScore = -1;
+        foreach (var c in small.GetPixelColors())
+        {
+            float max = Math.Max(c.R, Math.Max(c.G, c.B)) / 255f, min = Math.Min(c.R, Math.Min(c.G, c.B)) / 255f;
+            float score = max <= 0 ? 0 : (max - min) / max * max; // saturated and not too dark
+            if (score > bestScore) (best, bestScore) = (c, score);
+        }
+        float boost = 255f / Math.Max((int)Math.Max(best.R, Math.Max(best.G, best.B)), 1);
+        return Microsoft.UI.ColorHelper.FromArgb(255, (byte)Math.Min(255, best.R * boost), (byte)Math.Min(255, best.G * boost), (byte)Math.Min(255, best.B * boost));
     }
 
     /// <summary>Time-synced lyrics from LRCLIB (free, no key). Sends only the title and artist.</summary>

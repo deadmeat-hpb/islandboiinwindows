@@ -22,7 +22,7 @@ static class Glass
     static Color White(int a) => Gray(a, 255);
     static Color Gray(int a, byte v) => ColorHelper.FromArgb((byte)Math.Clamp(a, 0, 255), v, v, v);
 
-    public static void Draw(CanvasDrawingSession ds, ICanvasImage? background, float originX, float cx, float top, float w, float h, float s, float expand, Action<Rect>? content)
+    public static void Draw(CanvasDrawingSession ds, ICanvasImage? background, float originX, float cx, float top, float w, float h, float s, float expand, Color glow, float glowStrength, Action<Rect>? content)
     {
         ds.Transform = Matrix3x2.CreateTranslation(-originX, 0) * Matrix3x2.CreateScale(1f / s); // draw in screen pixels; originX = where the canvas sits
         var rect = new Rect(cx - w / 2, top, w, h);
@@ -30,14 +30,35 @@ static class Glass
         using var shape = RoundRect(ds, rect, r, 0);
 
         if (expand > 0) DrawShadow(ds, shape, s, expand);
+        if (glowStrength > 0) DrawGlow(ds, shape, rect, s, glow, glowStrength);
 
         if (background is not null) DrawRefraction(ds, background, rect, r, s, expand);
         else ds.FillGeometry(shape, Gray(200, 22));
 
         ds.FillGeometry(shape, Gray((int)(16 + 70 * expand), 12)); // light tint, darker when expanded for legible text
+        if (glowStrength > 0) // light from the album art spilling into the glass
+        {
+            using var light = new CanvasRadialGradientBrush(ds, WithAlpha(glow, 0.35f * glowStrength), WithAlpha(glow, 0))
+            {
+                Center = new Vector2((float)rect.X + 20 * s, (float)rect.Y + (float)rect.Height / 2),
+                RadiusX = (float)rect.Width * 0.7f, RadiusY = (float)rect.Height * 1.2f,
+            };
+            ds.FillGeometry(shape, light);
+        }
         if (content is not null)
             using (ds.CreateLayer(1f, shape)) content(rect);
         DrawRim(ds, shape, rect, r, s);
+    }
+
+    static Color WithAlpha(Color c, float a) => ColorHelper.FromArgb((byte)Math.Clamp(a * 255, 0, 255), c.R, c.G, c.B);
+
+    /// <summary>Soft halo around the island in the album's colour.</summary>
+    static void DrawGlow(CanvasDrawingSession ds, CanvasGeometry shape, Rect rect, float s, Color glow, float strength)
+    {
+        using var list = new CanvasCommandList(ds);
+        using (var c = list.CreateDrawingSession()) c.FillGeometry(shape, Colors.White);
+        using var halo = new ShadowEffect { Source = list, BlurAmount = 10 * s, ShadowColor = WithAlpha(glow, 0.55f * strength) };
+        ds.DrawImage(halo);
     }
 
     static void DrawShadow(CanvasDrawingSession ds, CanvasGeometry shape, float s, float expand)
