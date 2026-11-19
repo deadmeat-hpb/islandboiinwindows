@@ -73,7 +73,7 @@ sealed class SystemHud(DispatcherQueue ui)
                 if (pct <= level && _lowAnnounced > level)
                 {
                     _lowAnnounced = level;
-                    Raise(new("\uEBA0", pct / 100f, $"{pct}%", "Battery low", Red, 4));
+                    Raise(new("\uEBA0", pct / 100f, $"{pct}%", "Battery low", Red, 7));
                     break;
                 }
         };
