@@ -98,11 +98,11 @@ static class MediaView
         float px = (float)bar.X, pw = (float)bar.Width, py = (float)bar.Y, f = Scrub ?? (float)m.Progress;
         // Album colour, the same one lighting the glass (blended across the song slide).
         float ct = m.TransitionT; var c0 = m.PrevAccent; var c1 = m.Accent;
-        byte Mix(byte p, byte q) => (byte)(p + (q - p) * ct);
+        byte Mix(byte p, byte q) => (byte)((p + (q - p) * ct) * 0.75f + 255 * 0.25f); // lightened so it reads on the dark glass
         Color Accent(float al) => ColorHelper.FromArgb((byte)Math.Clamp(al * 255, 0, 255), Mix(c0.R, c1.R), Mix(c0.G, c1.G), Mix(c0.B, c1.B));
-        ds.FillRoundedRectangle(px, py, pw, 4 * s, 2 * s, 2 * s, Accent(0.25f * a));
+        ds.FillRoundedRectangle(px, py, pw, 4 * s, 2 * s, 2 * s, White(0.25f * a)); // neutral track
         ds.FillRoundedRectangle(px, py, pw * f, 4 * s, 2 * s, 2 * s, Accent(0.95f * a));
-        if (Scrub is not null) ds.FillCircle(px + pw * f, py + 2 * s, 6 * s, White(a)); // thumb while scrubbing
+        if (Scrub is not null) ds.FillCircle(px + pw * f, py + 2 * s, 6 * s, Accent(a)); // thumb while scrubbing
 
         using var icons = new CanvasTextFormat
         {
