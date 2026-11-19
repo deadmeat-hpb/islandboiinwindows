@@ -6,6 +6,7 @@ using Microsoft.UI;
 using Microsoft.UI.Dispatching;
 using NAudio.CoreAudioApi;
 using Windows.Devices.Enumeration;
+using Windows.Devices.Enumeration.Pnp;
 using Windows.Foundation;
 using Windows.Networking.Connectivity;
 using Microsoft.Graphics.Canvas.Geometry;
