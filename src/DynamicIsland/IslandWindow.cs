@@ -646,7 +646,12 @@ public sealed class IslandWindow : Window
             Mode.Hud => _hud?.Tint ?? cool,
             _ => _media.HasSession ? glow : cool, // album colour, blended during the song slide
         };
-        float washStrength = _mode is Mode.Idle or Mode.Hover ? 0 : Math.Clamp((_h.Value - 16 * _s) / (14 * _s), 0, 1); // grows in with the pill
+        float washStrength = Math.Clamp((_h.Value - 16 * _s) / (14 * _s), 0, 1); // grows in with the pill
+        if (_mode is Mode.Idle or Mode.Hover) // the bar: a soft light from its lower edge so it reads on dark screens too
+        {
+            wash = _media.Playing ? glow : Microsoft.UI.ColorHelper.FromArgb(255, 210, 220, 240);
+            washStrength = 1.6f;
+        }
         float landed = MathF.Max(0, 1 - (float)(clock - _pulseAt) / 0.6f); // 1 at the flow's impact, 0 after 0.6 s
         washStrength *= 1 + 0.5f * landed; // the inner light brightens a touch at the flow's impact, then settles
         glowStrength = MathF.Max(glowStrength, 0.25f * landed); // barely-there light spilling as the flow lands
