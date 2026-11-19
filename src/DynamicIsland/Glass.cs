@@ -137,8 +137,17 @@ static class Glass
             StartPoint = new Vector2((float)rect.Left, (float)rect.Top),
             EndPoint = new Vector2((float)rect.Right, (float)rect.Bottom),
         };
+        if (!inner) // melted into the top bar: no line along the screen edge or the shoulders; the rim fades in toward the bottom
+        {
+            using var fade = new CanvasLinearGradientBrush(ds, White(0), White(150))
+            {
+                StartPoint = new Vector2((float)rect.Left, (float)rect.Top + 2 * s),
+                EndPoint = new Vector2((float)rect.Left, (float)rect.Bottom),
+            };
+            ds.DrawGeometry(shape, fade, 1.1f * s);
+            return;
+        }
         ds.DrawGeometry(shape, brush, 1.1f * s);
-        if (!inner) return; // the inner highlight would draw round top corners inside the shoulders
         using var line = RoundRect(ds, rect, r, 1.5f * s);
         ds.DrawGeometry(line, White(28), 1f * s);
     }
@@ -149,10 +158,11 @@ static class Glass
     /// </summary>
     static CanvasGeometry Attached(ICanvasResourceCreator rc, Rect rect, float r, float f)
     {
-        float left = (float)rect.Left, right = (float)rect.Right, top = (float)rect.Top, fv = MathF.Max((float)rect.Height - r, 1);
-        using var body = CanvasGeometry.CreateRoundedRectangle(rc, rect, r, r);
-        using var band = CanvasGeometry.CreateRectangle(rc, left - f, top, right - left + 2 * f, fv); // squares off the top corners
-        using var l = CanvasGeometry.CreateEllipse(rc, left - f, top + fv, f, fv);                      // ...and carves the shoulders
+        float left = (float)rect.Left, right = (float)rect.Right, top = (float)rect.Top;
+        float fv = MathF.Min(f, MathF.Max((float)rect.Height - r, 1)); // same shoulders on the thin bar, the pill and the card
+        using var body = CanvasGeometry.CreateRoundedRectangle(rc, left, top - r, right - left, (float)rect.Height + r, r, r); // top corners sit above the screen edge, so it's square there
+        using var band = CanvasGeometry.CreateRectangle(rc, left - f, top - 1, right - left + 2 * f, fv + 1);
+        using var l = CanvasGeometry.CreateEllipse(rc, left - f, top + fv, f, fv); // carves the concave shoulders
         using var rr = CanvasGeometry.CreateEllipse(rc, right + f, top + fv, f, fv);
         using var a = band.CombineWith(l, Matrix3x2.Identity, CanvasGeometryCombine.Exclude);
         using var b = a.CombineWith(rr, Matrix3x2.Identity, CanvasGeometryCombine.Exclude);
