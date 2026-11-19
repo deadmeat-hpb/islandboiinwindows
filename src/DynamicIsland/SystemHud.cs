@@ -40,11 +40,9 @@ sealed class SystemHud(DispatcherQueue ui)
 
     public void Start()
     {
-        try
-        {
-            _devices = new MMDeviceEnumerator();
-            _devices.RegisterEndpointNotificationCallback(new DefaultDeviceWatch(() => ui.TryEnqueue(AttachSpeakers))); // follow switches to buds/headphones
-        }
+        // Follow switches to buds/headphones. WinRT event, not NAudio's IMMNotificationClient: that COM callback crashed the runtime
+        // (access violation in coreclr) whenever a Bluetooth headset changed state.
+        try { Windows.Media.Devices.MediaDevice.DefaultAudioRenderDeviceChanged += (_, e) => { if (e.Role == Windows.Media.Devices.AudioDeviceRole.Default) ui.TryEnqueue(AttachSpeakers); }; }
         catch (Exception ex) { Debug.WriteLine($"Audio device notifications unavailable: {ex}"); }
         AttachSpeakers();
 
@@ -87,20 +85,11 @@ sealed class SystemHud(DispatcherQueue ui)
         try
         {
             _speakers?.Dispose();
-            _speakers = (_devices ?? new MMDeviceEnumerator()).GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+            _speakers = (_devices ??= new MMDeviceEnumerator()).GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
             _speakers.AudioEndpointVolume.OnVolumeNotification += d =>
                 Raise(new(d.Muted ? "\uE74F" : "\uE767", d.Muted ? 0 : d.MasterVolume, ""));
         }
         catch (Exception ex) { Debug.WriteLine($"Volume unavailable: {ex}"); }
-    }
-
-    sealed class DefaultDeviceWatch(Action changed) : NAudio.CoreAudioApi.Interfaces.IMMNotificationClient
-    {
-        public void OnDefaultDeviceChanged(DataFlow flow, Role role, string id) { if (flow == DataFlow.Render && role == Role.Multimedia) changed(); }
-        public void OnDeviceStateChanged(string id, DeviceState state) { }
-        public void OnDeviceAdded(string id) { }
-        public void OnDeviceRemoved(string id) { }
-        public void OnPropertyValueChanged(string id, PropertyKey key) { }
     }
 
     void StartBluetooth()
