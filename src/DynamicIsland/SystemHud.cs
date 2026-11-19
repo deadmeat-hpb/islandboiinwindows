@@ -109,7 +109,7 @@ sealed class SystemHud(DispatcherQueue ui)
         if (!_btReady || !connected || was || !_btInfo.TryGetValue(id, out var info)) return;
 
         int? battery = await BatteryOf(info.Container);
-        Raise(new("\uE702", battery is int b ? b / 100f : -1, battery is int p ? $"{p}%" : "", info.Name, Seconds: 3));
+        Raise(new("\uE702", battery is int b ? b / 100f : -1, battery is int p ? $"{p}%" : "", info.Name, Seconds: 5));
     }
 
     /// <summary>Battery % from the device node that shares the endpoint's container, if the device reports one.</summary>
