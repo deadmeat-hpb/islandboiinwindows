@@ -271,7 +271,7 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
         return titled != 0 ? titled : any != 0 ? any : titledAny;
     }
 
-    static string? AppIdOf(Process p)
+    internal static string? AppIdOf(Process p)
     {
         try
         {

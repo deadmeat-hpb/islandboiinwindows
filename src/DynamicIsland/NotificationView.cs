@@ -1,0 +1,263 @@
+using System.Globalization;
+using System.Numerics;
+using System.Text.RegularExpressions;
+using Microsoft.Graphics.Canvas;
+using Microsoft.Graphics.Canvas.Text;
+using Microsoft.UI;
+using Microsoft.UI.Text;
+using Windows.Foundation;
+using Windows.UI;
+using FontWeight = Windows.UI.Text.FontWeight;
+
+namespace DynamicIsland;
+
+/// <summary>What kind of notification it is, which picks its pill and card design.</summary>
+enum NoteKind { Generic, Message, Mail, Calendar, Call, Web, Screenshot, Dpi }
+
+/// <summary>
+/// Notification pills and cards. Windows only gives a notification listener the toast's text and the app's icon (no
+/// images inside the toast, no way to press its buttons or reply), so each design is built from those, plus the
+/// clipboard image for screenshots.
+/// </summary>
+static partial class NotificationView
+{
+    static readonly string[] Messengers = ["whatsapp", "telegram", "discord", "line", "wechat", "weixin", "messenger", "teams", "signal", "slack", "skype", "instagram"];
+    static readonly string[] Mailers = ["outlook", "mail", "gmail", "thunderbird", "spark"];
+    static readonly string[] Browsers = ["chrome", "edge", "firefox", "brave", "opera", "vivaldi", "arc"];
+
+    [GeneratedRegex(@"\b(incoming (video |voice |audio )?call|is calling|calling you|來電|通話)", RegexOptions.IgnoreCase)] private static partial Regex CallText();
+    [GeneratedRegex(@"\b(reminder|starts? (in|at)|meeting|event|提醒|會議)\b", RegexOptions.IgnoreCase)] private static partial Regex CalendarText();
+    [GeneratedRegex(@"^(?:https?://)?([\w-]+\.)+[a-z]{2,}(/\S*)?$", RegexOptions.IgnoreCase)] private static partial Regex Domain();
+    [GeneratedRegex(@"\b(\d{1,2}):(\d{2})\s*(am|pm|上午|下午)?", RegexOptions.IgnoreCase)] private static partial Regex Clock();
+    [GeneratedRegex(@"\d{2,5}")] private static partial Regex Number();
+
+    static bool Has(string s, string[] keys) => keys.Any(k => s.Contains(k, StringComparison.OrdinalIgnoreCase));
+
+    public static NoteKind KindOf(IslandNotification n)
+    {
+        string app = $"{n.App} {n.AppId}", text = $"{n.Title}\n{n.Body}";
+        if (app.Contains("G HUB", StringComparison.OrdinalIgnoreCase) || app.Contains("logitech", StringComparison.OrdinalIgnoreCase))
+            return text.Contains("DPI", StringComparison.OrdinalIgnoreCase) || Number().IsMatch(text) ? NoteKind.Dpi : NoteKind.Generic;
+        if (app.Contains("snip", StringComparison.OrdinalIgnoreCase) || app.Contains("ScreenSketch", StringComparison.OrdinalIgnoreCase) || text.Contains("screenshot", StringComparison.OrdinalIgnoreCase))
+            return NoteKind.Screenshot;
+        if (CallText().IsMatch(text)) return NoteKind.Call;
+        if (Has(app, Messengers)) return NoteKind.Message;
+        if (app.Contains("calendar", StringComparison.OrdinalIgnoreCase) || app.Contains("outlook", StringComparison.OrdinalIgnoreCase) && CalendarText().IsMatch(text)) return NoteKind.Calendar;
+        if (Has(app, Mailers)) return NoteKind.Mail;
+        if (Has(app, Browsers)) return NoteKind.Web;
+        if (CalendarText().IsMatch(n.Title)) return NoteKind.Calendar;
+        return NoteKind.Generic;
+    }
+
+    public const float CardW = 380;
+
+    public static float CardH(IslandNotification n) => KindOf(n) switch
+    {
+        NoteKind.Dpi => 120,
+        NoteKind.Call => 132,
+        NoteKind.Screenshot => n.Thumb is null ? 120 : 214,
+        NoteKind.Calendar => 140,
+        _ => 168,
+    };
+
+    static Color White(float a) => ColorHelper.FromArgb((byte)Math.Clamp(a * 255, 0, 255), 255, 255, 255);
+    static Color Tint(Color c, float a) => ColorHelper.FromArgb((byte)Math.Clamp(a * 255, 0, 255), c.R, c.G, c.B);
+    static readonly Color Cool = ColorHelper.FromArgb(255, 150, 180, 255);
+
+    static CanvasTextFormat Format(float size, FontWeight weight, bool wrap = false, CanvasHorizontalAlignment h = CanvasHorizontalAlignment.Left, CanvasVerticalAlignment v = CanvasVerticalAlignment.Top) => new()
+    {
+        FontFamily = Fonts.Inter(weight), FontSize = size, FontWeight = weight,
+        WordWrapping = wrap ? CanvasWordWrapping.WholeWord : CanvasWordWrapping.NoWrap,
+        TrimmingGranularity = wrap ? CanvasTextTrimmingGranularity.Word : CanvasTextTrimmingGranularity.Character,
+        HorizontalAlignment = h, VerticalAlignment = v,
+    };
+
+    static void Icon(CanvasDrawingSession ds, IslandNotification n, Rect r, float a, bool round)
+    {
+        if (round && n.Icon is not null)
+        {
+            using var clip = Microsoft.Graphics.Canvas.Geometry.CanvasGeometry.CreateEllipse(ds, (float)(r.X + r.Width / 2), (float)(r.Y + r.Height / 2), (float)r.Width / 2, (float)r.Height / 2);
+            using (ds.CreateLayer(a, clip)) ds.DrawImage(n.Icon, r, n.Icon.Bounds);
+            return;
+        }
+        MediaView.DrawArt(ds, n.Icon, r, (float)r.Width * (round ? 0.5f : 0.25f), a);
+    }
+
+    /// <summary>Clipped text block (wrapped, word-trimmed) so long messages never spill out of the card.</summary>
+    static void Block(CanvasDrawingSession ds, string text, Rect box, Color c, CanvasTextFormat f)
+    {
+        if (text.Length == 0 || box.Height <= 0 || box.Width <= 0) return;
+        using (ds.CreateLayer(1f, box)) ds.DrawText(text, box, c, f);
+    }
+
+    static string When(IslandNotification n) => n.At == default || (DateTime.Now - n.At).TotalMinutes < 1 ? "now" : n.At.ToString("HH:mm");
+
+    /// <summary>A browser toast's site ("youtube.com"), taken from a text line that is just a domain.</summary>
+    static (string Site, string Body) SplitSite(IslandNotification n)
+    {
+        var lines = n.Body.Split('\n').ToList();
+        int i = lines.FindLastIndex(l => Domain().IsMatch(l.Trim()));
+        if (i < 0) return ("", n.Body);
+        string site = Domain().Match(lines[i].Trim()).Value.Replace("https://", "").Replace("http://", "").Split('/')[0];
+        lines.RemoveAt(i);
+        return (site, string.Join("\n", lines));
+    }
+
+    static string DpiValue(IslandNotification n) => Number().Matches($"{n.Title} {n.Body}").Select(m => m.Value).LastOrDefault() ?? "";
+
+    // ---------------------------------------------------------------- pill
+
+    public static void Draw(CanvasDrawingSession ds, Rect r, float s, IslandNotification n, float a)
+    {
+        float x = (float)r.X, y = (float)r.Y, w = (float)r.Width, h = (float)r.Height;
+        var kind = KindOf(n);
+        float icon = 40 * s;
+        Icon(ds, n, new Rect(x + 16 * s, y + (h - icon) / 2, icon, icon), a, kind is NoteKind.Message or NoteKind.Call);
+        float tx = x + 70 * s, tw = w - 86 * s;
+        using var title = Format(15 * s, FontWeights.SemiBold);
+        using var body = Format(13 * s, FontWeights.Normal);
+
+        if (kind == NoteKind.Dpi)
+        {
+            using var big = Format(22 * s, FontWeights.SemiBold, v: CanvasVerticalAlignment.Center);
+            ds.DrawText("DPI", new Rect(tx, y, 50 * s, h), White(0.55f * a), Format(13 * s, FontWeights.SemiBold, v: CanvasVerticalAlignment.Center));
+            Fonts.DrawTabular(ds, DpiValue(n), new Rect(tx + 38 * s, y, tw - 38 * s, h), White(a), big);
+            return;
+        }
+        string head = n.Title.Length > 0 ? n.Title : n.App;
+        string line = kind == NoteKind.Web ? SplitSite(n).Body : n.Body;
+        if (kind == NoteKind.Call) line = "Incoming call";
+        ds.DrawText(head, new Rect(tx, y + 15 * s, tw, 22 * s), White(a), title);
+        ds.DrawText(line.Length > 0 ? line.Replace('\n', ' ') : n.App, new Rect(tx, y + 39 * s, tw, 20 * s), White(0.67f * a), body);
+    }
+
+    // ---------------------------------------------------------------- card
+
+    public static void DrawExpanded(CanvasDrawingSession ds, Rect r, float s, IslandNotification n, float a)
+    {
+        var kind = KindOf(n);
+        float x = (float)r.X, y = (float)r.Y, w = (float)r.Width, pad = 16 * s, tw = w - 2 * pad;
+        var accent = n.Accent ?? Cool;
+
+        // Header shared by every design: small icon, app name, time.
+        if (kind is not (NoteKind.Call or NoteKind.Dpi))
+        {
+            Icon(ds, n, new Rect(x + pad, y + 14 * s, 22 * s, 22 * s), a, false);
+            using var app = Format(12 * s, FontWeights.Medium, v: CanvasVerticalAlignment.Center);
+            string site = kind == NoteKind.Web ? SplitSite(n).Site : "";
+            ds.DrawText($"{n.App}{(site.Length > 0 ? "  ·  " + site : "")}  ·  {When(n)}", new Rect(x + pad + 30 * s, y + 13 * s, tw - 30 * s, 24 * s), White(0.47f * a), app);
+        }
+        float top = y + 46 * s, bottom = (float)r.Bottom - 14 * s;
+
+        switch (kind)
+        {
+            case NoteKind.Message: // sender, then the message in a soft bubble
+            {
+                using var name = Format(15 * s, FontWeights.SemiBold);
+                ds.DrawText(n.Title.Length > 0 ? n.Title : n.App, new Rect(x + pad, top, tw, 22 * s), White(a), name);
+                using var msg = Format(13.5f * s, FontWeights.Normal, wrap: true);
+                string text = n.Body.Length > 0 ? n.Body : "New message";
+                using var layout = new CanvasTextLayout(ds, text, msg, tw - 24 * s, bottom - top - 44 * s);
+                float bh = MathF.Min((float)layout.LayoutBounds.Height, bottom - top - 44 * s) + 16 * s;
+                var bubble = new Rect(x + pad, top + 28 * s, MathF.Min((float)layout.LayoutBounds.Width + 24 * s, tw), bh);
+                ds.FillRoundedRectangle(bubble, 14 * s, 14 * s, Tint(accent, 0.20f * a));
+                using (ds.CreateLayer(1f, bubble)) ds.DrawTextLayout(layout, (float)bubble.X + 12 * s, (float)bubble.Y + 8 * s, White(0.92f * a));
+                break;
+            }
+            case NoteKind.Mail: // sender, bold subject, preview
+            {
+                var lines = n.Body.Split('\n', 2);
+                using var from = Format(13 * s, FontWeights.Medium);
+                using var subject = Format(15 * s, FontWeights.SemiBold);
+                using var preview = Format(13 * s, FontWeights.Normal, wrap: true);
+                ds.DrawText(n.Title.Length > 0 ? n.Title : n.App, new Rect(x + pad, top, tw, 20 * s), White(0.75f * a), from);
+                ds.DrawText(lines[0], new Rect(x + pad, top + 22 * s, tw, 22 * s), White(a), subject);
+                Block(ds, lines.Length > 1 ? lines[1] : "", new Rect(x + pad, top + 48 * s, tw, bottom - top - 48 * s), White(0.62f * a), preview);
+                break;
+            }
+            case NoteKind.Calendar: // accent bar, title, time + countdown, location
+            {
+                ds.FillRoundedRectangle(x + pad, top + 2 * s, 4 * s, bottom - top - 4 * s, 2 * s, 2 * s, Tint(accent, 0.9f * a));
+                float cx = x + pad + 14 * s, cw = tw - 14 * s;
+                using var title = Format(16 * s, FontWeights.SemiBold);
+                using var detail = Format(13 * s, FontWeights.Normal);
+                ds.DrawText(n.Title.Length > 0 ? n.Title : n.App, new Rect(cx, top, cw, 24 * s), White(a), title);
+                var lines = n.Body.Split('\n');
+                string time = lines.FirstOrDefault(l => Clock().IsMatch(l)) ?? (lines.Length > 0 ? lines[0] : "");
+                string countdown = Countdown(time);
+                ds.DrawText(time + (countdown.Length > 0 ? "  ·  " + countdown : ""), new Rect(cx, top + 28 * s, cw, 20 * s), Tint(accent, a), detail);
+                string place = string.Join("  ·  ", lines.Where(l => l != time && l.Trim().Length > 0));
+                ds.DrawText(place, new Rect(cx, top + 50 * s, cw, 20 * s), White(0.6f * a), detail);
+                break;
+            }
+            case NoteKind.Call: // caller centred, a slow ring around the avatar
+            {
+                float av = 56 * s, ax = x + pad, ay = y + ((float)r.Height - av) / 2;
+                double t = DateTime.Now.TimeOfDay.TotalSeconds;
+                float ring = (float)(t % 1.6 / 1.6);
+                ds.DrawCircle(ax + av / 2, ay + av / 2, av / 2 + 4 * s + ring * 10 * s, Tint(accent, (1 - ring) * 0.5f * a), 2 * s);
+                Icon(ds, n, new Rect(ax, ay, av, av), a, true);
+                using var who = Format(18 * s, FontWeights.SemiBold);
+                using var what = Format(13 * s, FontWeights.Normal);
+                ds.DrawText(n.Title.Length > 0 ? n.Title : n.App, new Rect(ax + av + 16 * s, ay + 6 * s, tw - av - 16 * s, 26 * s), White(a), who);
+                ds.DrawText($"{n.App} · {(n.Body.Length > 0 ? n.Body.Split('\n')[0] : "Incoming call")}", new Rect(ax + av + 16 * s, ay + 32 * s, tw - av - 16 * s, 20 * s), White(0.6f * a), what);
+                break;
+            }
+            case NoteKind.Screenshot: // the capture itself, when it's on the clipboard
+            {
+                using var title = Format(15 * s, FontWeights.SemiBold);
+                ds.DrawText(n.Title.Length > 0 ? n.Title : "Screenshot", new Rect(x + pad, top, tw, 22 * s), White(a), title);
+                if (n.Thumb is { } img)
+                {
+                    float maxH = bottom - top - 30 * s, scale = MathF.Min(tw / (float)img.Size.Width, maxH / (float)img.Size.Height);
+                    var dest = new Rect(x + pad, top + 30 * s, img.Size.Width * scale, img.Size.Height * scale);
+                    MediaView.DrawArt(ds, img, dest, 8 * s, a);
+                }
+                else ds.DrawText(n.Body.Length > 0 ? n.Body.Replace('\n', ' ') : "Click to open", new Rect(x + pad, top + 26 * s, tw, 20 * s), White(0.6f * a), Format(13 * s, FontWeights.Normal));
+                break;
+            }
+            case NoteKind.Dpi: // G HUB: mouse glyph, big DPI value
+            {
+                var logi = ColorHelper.FromArgb(255, 0, 184, 252);
+                float cy = y + (float)r.Height / 2;
+                ds.FillCircle(x + pad + 26 * s, cy, 26 * s, Tint(logi, 0.18f * a));
+                using var glyph = new CanvasTextFormat { FontFamily = "Segoe Fluent Icons", FontSize = 24 * s, HorizontalAlignment = CanvasHorizontalAlignment.Center, VerticalAlignment = CanvasVerticalAlignment.Center };
+                ds.DrawText("", new Rect(x + pad, cy - 26 * s, 52 * s, 52 * s), White(0.95f * a), glyph);
+                using var label = Format(12 * s, FontWeights.Medium);
+                using var big = Format(34 * s, FontWeights.SemiBold, v: CanvasVerticalAlignment.Center);
+                float tx = x + pad + 70 * s;
+                ds.DrawText($"{n.App} · DPI", new Rect(tx, cy - 32 * s, tw - 70 * s, 18 * s), White(0.5f * a), label);
+                Fonts.DrawTabular(ds, DpiValue(n), new Rect(tx, cy - 16 * s, tw - 70 * s, 44 * s), White(a), big);
+                break;
+            }
+            default: // generic and web push (the site is in the header)
+            {
+                using var title = Format(15 * s, FontWeights.SemiBold, wrap: true);
+                using var text = Format(13 * s, FontWeights.Normal, wrap: true);
+                string head = n.Title.Length > 0 ? n.Title : n.App;
+                string bodyText = kind == NoteKind.Web ? SplitSite(n).Body : n.Body;
+                using var tl = new CanvasTextLayout(ds, head, title, tw, 42 * s);
+                float th = MathF.Min((float)tl.LayoutBounds.Height, 42 * s);
+                Block(ds, head, new Rect(x + pad, top, tw, th + 2 * s), White(a), title);
+                Block(ds, bodyText, new Rect(x + pad, top + th + 6 * s, tw, bottom - top - th - 6 * s), White(0.65f * a), text);
+                break;
+            }
+        }
+    }
+
+    /// <summary>"in 10 min" for a time later today found in the text, else "".</summary>
+    static string Countdown(string text)
+    {
+        var m = Clock().Match(text);
+        if (!m.Success) return "";
+        int h = int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture), min = int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture);
+        string ampm = m.Groups[3].Value.ToLowerInvariant();
+        if ((ampm is "pm" or "下午") && h < 12) h += 12;
+        if ((ampm is "am" or "上午") && h == 12) h = 0;
+        if (h > 23 || min > 59) return "";
+        var at = DateTime.Today.AddHours(h).AddMinutes(min);
+        var left = at - DateTime.Now;
+        if (left <= TimeSpan.Zero || left > TimeSpan.FromHours(12)) return left <= TimeSpan.Zero && left > TimeSpan.FromMinutes(-30) ? "now" : "";
+        return left.TotalMinutes < 60 ? $"in {Math.Max(1, (int)left.TotalMinutes)} min" : $"in {(int)left.TotalHours} h {left.Minutes} min";
+    }
+}

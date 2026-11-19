@@ -10,7 +10,7 @@ using Windows.UI.Notifications.Management;
 
 namespace DynamicIsland;
 
-sealed record IslandNotification(string App, string Title, string Body, CanvasBitmap? Icon, string AppId, Windows.UI.Color? Accent = null, DateTime At = default);
+sealed record IslandNotification(string App, string Title, string Body, CanvasBitmap? Icon, string AppId, Windows.UI.Color? Accent = null, DateTime At = default, CanvasBitmap? Thumb = null);
 
 /// <summary>Picks up new Windows toast notifications. Windows asks the user for access once.</summary>
 sealed class NotificationSource(CanvasDevice device)
@@ -71,80 +71,106 @@ sealed class NotificationSource(CanvasDevice device)
         Windows.UI.Color? accent = null;
         if (icon is not null && !_accents.TryGetValue(appId, out var cached)) _accents[appId] = cached = MediaSource.AccentOf(device, icon); // the app's colour, once per app
         if (icon is not null) accent = _accents[appId];
-        return new(n.AppInfo?.DisplayInfo?.DisplayName ?? "", texts.FirstOrDefault() ?? "", string.Join("\n", texts.Skip(1)), icon, appId, accent, DateTime.Now);
+        var note = new IslandNotification(n.AppInfo?.DisplayInfo?.DisplayName ?? "", texts.FirstOrDefault() ?? "", string.Join("\n", texts.Skip(1)), icon, appId, accent, DateTime.Now);
+        if (NotificationView.KindOf(note) == NoteKind.Screenshot) note = note with { Thumb = await ClipboardImage() };
+        return note;
+    }
+
+    /// <summary>The image on the clipboard (Win+Shift+S puts the snip there), scaled down, or null.</summary>
+    async Task<CanvasBitmap?> ClipboardImage()
+    {
+        try
+        {
+            var content = Windows.ApplicationModel.DataTransfer.Clipboard.GetContent();
+            if (!content.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Bitmap)) return null;
+            using var stream = await (await content.GetBitmapAsync()).OpenReadAsync();
+            var decoder = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(stream);
+            double scale = Math.Min(1, 640.0 / Math.Max(decoder.PixelWidth, decoder.PixelHeight));
+            using var pixels = await decoder.GetSoftwareBitmapAsync(Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8, Windows.Graphics.Imaging.BitmapAlphaMode.Premultiplied,
+                new Windows.Graphics.Imaging.BitmapTransform { ScaledWidth = (uint)Math.Max(1, decoder.PixelWidth * scale), ScaledHeight = (uint)Math.Max(1, decoder.PixelHeight * scale) },
+                Windows.Graphics.Imaging.ExifOrientationMode.IgnoreExifOrientation, Windows.Graphics.Imaging.ColorManagementMode.DoNotColorManage);
+            return CanvasBitmap.CreateFromSoftwareBitmap(device, pixels);
+        }
+        catch (Exception ex) { Debug.WriteLine($"Clipboard image unavailable: {ex.Message}"); return null; }
     }
     readonly Dictionary<string, Windows.UI.Color> _accents = [];
 
-    public static void Open(IslandNotification n)
+    /// <summary>
+    /// Brings the notifying app forward. Windows doesn't let a listener trigger the toast's own click, so: its open window
+    /// (matched by app id or app name), else launch it by app id if Windows knows that id, else re-run its running exe
+    /// (single-instance apps like G HUB then show their window). Never a bare explorer.exe.
+    /// </summary>
+    public static void Open(IslandNotification n) => Task.Run(() =>
     {
-        if (n.AppId.Length == 0) return;
-        try { Process.Start(new ProcessStartInfo("explorer.exe", $"shell:AppsFolder\\{n.AppId}") { UseShellExecute = true }); }
-        catch (Exception ex) { Debug.WriteLine($"Couldn't open {n.App}: {ex}"); }
+        try
+        {
+            if (FindWindow(n) is var w && w != 0)
+            {
+                if (Native.IsIconic(w)) Native.ShowWindow(w, 9 /* SW_RESTORE */);
+                Native.SetForegroundWindow(w);
+                return;
+            }
+            if (n.AppId.Length > 0 && IsInAppsFolder(n.AppId))
+            {
+                Process.Start(new ProcessStartInfo("explorer.exe", $"shell:AppsFolder\\{n.AppId}") { UseShellExecute = true });
+                return;
+            }
+            if (RunningExe(n) is { } exe) Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true });
+        }
+        catch (Exception ex) { Debug.WriteLine($"Couldn't open {n.App}: {ex.Message}"); }
+    });
+
+    static bool Mine(Process p, IslandNotification n)
+    {
+        if (n.AppId.Length > 0 && MediaSource.AppIdOf(p) == n.AppId) return true;
+        try
+        {
+            var info = p.MainModule?.FileVersionInfo;
+            string app = n.App.Trim();
+            return app.Length > 0 && (string.Equals(info?.FileDescription?.Trim(), app, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(info?.ProductName?.Trim(), app, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(p.ProcessName, app.Replace(" ", ""), StringComparison.OrdinalIgnoreCase));
+        }
+        catch { return false; } // elevated or system process
+    }
+
+    static nint FindWindow(IslandNotification n)
+    {
+        nint found = 0;
+        var seen = new Dictionary<uint, bool>();
+        Native.EnumWindows((hwnd, _) =>
+        {
+            if (!Native.IsWindowVisible(hwnd) || Native.GetWindowTextLength(hwnd) == 0) return true;
+            Native.GetWindowThreadProcessId(hwnd, out uint pid);
+            if (!seen.TryGetValue(pid, out bool mine))
+            {
+                try { using var p = Process.GetProcessById((int)pid); mine = Mine(p, n); } catch { mine = false; }
+                seen[pid] = mine;
+            }
+            if (mine) { found = hwnd; return false; }
+            return true;
+        }, 0);
+        return found;
+    }
+
+    static string? RunningExe(IslandNotification n)
+    {
+        foreach (var p in Process.GetProcesses())
+            using (p)
+                try { if (Mine(p, n)) return p.MainModule?.FileName; } catch { }
+        return null;
+    }
+
+    /// <summary>True when shell:AppsFolder has an entry for this app id (otherwise explorer would just open a folder).</summary>
+    static bool IsInAppsFolder(string appId)
+    {
+        try
+        {
+            dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("Shell.Application")!)!;
+            var folder = shell.NameSpace("shell:AppsFolder");
+            return folder?.ParseName(appId) != null;
+        }
+        catch { return false; }
     }
 }
 
-static class NotificationView
-{
-    public static void Draw(CanvasDrawingSession ds, Rect r, float s, IslandNotification n, float a)
-    {
-        float x = (float)r.X, y = (float)r.Y, w = (float)r.Width, h = (float)r.Height;
-        float icon = 40 * s;
-        MediaView.DrawArt(ds, n.Icon, new Rect(x + 16 * s, y + (h - icon) / 2, icon, icon), 10 * s, a);
-
-        using var title = new CanvasTextFormat
-        {
-            FontFamily = Fonts.Inter(FontWeights.SemiBold), FontSize = 15 * s, FontWeight = FontWeights.SemiBold,
-            WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character,
-        };
-        using var body = new CanvasTextFormat
-        {
-            FontFamily = Fonts.Inter(FontWeights.Normal), FontSize = 13 * s,
-            WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character,
-        };
-        float tx = x + 70 * s, tw = w - 86 * s;
-        var white = ColorHelper.FromArgb((byte)(255 * a), 255, 255, 255);
-        var dim = ColorHelper.FromArgb((byte)(170 * a), 255, 255, 255);
-        ds.DrawText(n.Title.Length > 0 ? n.Title : n.App, new Rect(tx, y + 15 * s, tw, 22 * s), white, title);
-        ds.DrawText(n.Body.Length > 0 ? n.Body.Replace('\n', ' ') : n.App, new Rect(tx, y + 39 * s, tw, 20 * s), dim, body);
-    }
-
-    public const float CardW = 380, CardH = 168;
-
-    /// <summary>Expanded notification: app icon, app name and time, then the full title and message (wrapped, up to ~4 lines).</summary>
-    public static void DrawExpanded(CanvasDrawingSession ds, Rect r, float s, IslandNotification n, float a)
-    {
-        float x = (float)r.X, y = (float)r.Y, w = (float)r.Width;
-        var white = ColorHelper.FromArgb((byte)(255 * a), 255, 255, 255);
-        var dim = ColorHelper.FromArgb((byte)(175 * a), 255, 255, 255);
-        var faint = ColorHelper.FromArgb((byte)(120 * a), 255, 255, 255);
-        MediaView.DrawArt(ds, n.Icon, new Rect(x + 16 * s, y + 14 * s, 24 * s, 24 * s), 6 * s, a);
-        using var app = new CanvasTextFormat
-        {
-            FontFamily = Fonts.Inter(FontWeights.Medium), FontSize = 12 * s, FontWeight = FontWeights.Medium,
-            VerticalAlignment = CanvasVerticalAlignment.Center, WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character,
-        };
-        string when = n.At == default ? "now" : (DateTime.Now - n.At).TotalMinutes < 1 ? "now" : n.At.ToString("HH:mm");
-        ds.DrawText($"{n.App}  ·  {when}", new Rect(x + 48 * s, y + 14 * s, w - 64 * s, 24 * s), faint, app);
-
-        using var title = new CanvasTextFormat
-        {
-            FontFamily = Fonts.Inter(FontWeights.SemiBold), FontSize = 15 * s, FontWeight = FontWeights.SemiBold,
-            WordWrapping = CanvasWordWrapping.WholeWord, TrimmingGranularity = CanvasTextTrimmingGranularity.Word,
-        };
-        using var body = new CanvasTextFormat
-        {
-            FontFamily = Fonts.Inter(FontWeights.Normal), FontSize = 13 * s, LineSpacing = 18 * s,
-            WordWrapping = CanvasWordWrapping.WholeWord, TrimmingGranularity = CanvasTextTrimmingGranularity.Word,
-        };
-        float tw = w - 32 * s;
-        string t = n.Title.Length > 0 ? n.Title : n.App;
-        using var titleLayout = new CanvasTextLayout(ds, t, title, tw, 42 * s); // up to 2 lines
-        float th = MathF.Min((float)titleLayout.LayoutBounds.Height, 42 * s);
-        using (ds.CreateLayer(1f, new Rect(x + 16 * s, y + 46 * s, tw, th + 1)))
-            ds.DrawTextLayout(titleLayout, x + 16 * s, y + 46 * s, white);
-        float by = y + 50 * s + th, bh = (float)r.Bottom - 14 * s - by; // the rest of the card: ~4 lines of message
-        if (n.Body.Length > 0 && bh > 10 * s)
-            using (ds.CreateLayer(1f, new Rect(x + 16 * s, by, tw, bh)))
-                ds.DrawText(n.Body, new Rect(x + 16 * s, by, tw, bh), dim, body);
-    }
-}

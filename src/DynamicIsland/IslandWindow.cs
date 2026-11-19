@@ -103,8 +103,11 @@ public sealed class IslandWindow : Window
         var hud = _system = new SystemHud(DispatcherQueue);
         hud.Changed += e =>
         {
-            if (_fullscreen || _mode == Mode.Notify || _mode == Mode.Expanded && e.Text.Length == 0) return; // level bars don't cover a card; battery/Bluetooth/Wi-Fi notices do
-            if (_mode == Mode.Expanded) _reopen = true; // the card stays open now, so come back to it after the notice
+            if (_fullscreen || _mode == Mode.Notify) return;
+            if (_mode == Mode.Expanded) // the open card stacks under the notice (as a card if it's the media card) and comes back after it
+            {
+                if (_media.HasSession) _stackOpen = true; else _reopen = true;
+            }
             bool sameCard = _mode == Mode.Hud && _detail && _hud?.Kind == e.Kind; // the open card just shows the new value
             if (_mode == Mode.Hud) _leaving = false; // a new value while it was sliding away: it stays
             _hud = e;
@@ -217,7 +220,7 @@ public sealed class IslandWindow : Window
             Mode.Idle => (84 * _s, 8 * _s, 0f),     // idle and hover melt into the screen edge (see Glass.Attached)
             Mode.Hover => (124 * _s, 16 * _s, 0f),
             Mode.Compact => (210 * _s, 32 * _s, 6 * _s), // everything else drops out of the bar as a floating pill with its full glass rim
-            Mode.Notify when _detail => (NotificationView.CardW * _s, NotificationView.CardH * _s, 8 * _s),
+            Mode.Notify when _detail && _note is not null => (NotificationView.CardW * _s, NotificationView.CardH(_note) * _s, 8 * _s),
             Mode.Hud when _detail && _hud is not null => (HudView.CardW * _s, HudView.CardH(_hud, _outputs.Count) * _s, 8 * _s),
             Mode.Notify => (360 * _s, 72 * _s, 8 * _s),
             Mode.Hud => ((_hud?.Text.Length > 0 ? 300 : 240) * _s, 32 * _s, 6 * _s), // notices are wider than level bars
@@ -302,6 +305,7 @@ public sealed class IslandWindow : Window
         bool captureDue = animating || (_mode != Mode.Idle || now - _lastCapture > 0.25) && PowerManager.EnergySaverStatus != EnergySaverStatus.On;
         if (captureDue && _capture?.TryUpdate() == true) { _dirty = true; _lastCapture = now; }
         bool playing = _media.Playing && (_mode is Mode.Compact or Mode.Expanded || _stack.Value > 2 * _s) || _mode == Mode.Expanded && (MediaView.TitleScrolls || MediaView.LyricsAnimating(_clock.Elapsed.TotalSeconds));
+        if (_mode == Mode.Notify && _detail && _note is not null && NotificationView.KindOf(_note) == NoteKind.Call) playing = true; // the ring around the caller
         if (playing) _dirty = true; // waveform, progress bar and scrolling title move
         if (ShowClock && DateTime.Now.Minute != _clockMinute) { _clockMinute = DateTime.Now.Minute; _dirty = true; } // clock: one redraw per minute change
         _slowTick.Interval = TimeSpan.FromMilliseconds(playing ? 33 : 66); // waveform needs ~30 fps to look alive
