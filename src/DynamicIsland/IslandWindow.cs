@@ -306,7 +306,7 @@ public sealed class IslandWindow : Window
     {
         if (!_pressed) return;
         float x = PointerX(e);
-        if (!_dragging && _mode != Mode.Expanded && MathF.Abs(x - _pressX) > 5 * _s) // the open card is for clicks; drag the bar or pill
+        if (!_dragging && MathF.Abs(x - _pressX) > (_mode == Mode.Expanded ? 24 : 5) * _s) // the open card needs a deliberate drag so wobbly clicks still count as clicks
         {
             _dragging = true;
             if (_mode == Mode.Idle) SetMode(Mode.Hover);
