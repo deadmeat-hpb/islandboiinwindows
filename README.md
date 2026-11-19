@@ -4,29 +4,38 @@ A Dynamic Island for Windows, with an Apple Liquid Glass look.
 
 ## What it does
 
-- Idle: a slim glass bar at the top of the screen. Clicks pass through around it.
+### The island
+- Idle: a slim glass bar hanging from the top edge, lit softly from below (the song's colour while music plays). Clicks pass through around it. With nothing playing it shows the time and date.
 - Hover: it swells so it's easy to grab.
 - Drag it left or right along the top edge. It stretches with speed, bounces back, snaps to left / center / right, and remembers where you left it.
-- Click: morphs into the expanded card. Click again, or move the mouse away, to collapse.
-- Music: while anything plays (Spotify, a browser, Media Player...), the island becomes a compact pill with the album art and a moving waveform. Click it for the full card: art, title, artist, progress, and previous / play-pause / next. The card also shows the current lyric line above the progress bar when [LRCLIB](https://lrclib.net) has synced lyrics for the song (it receives the title and artist).
-- Notifications: new Windows notifications drop down from the island for 5 seconds (hover to keep one open, click to open the app). Windows asks once for notification access. To stop Windows' own pop-ups doubling up, turn off "Show notification banners" in Settings > System > Notifications.
-- Volume, brightness (laptop screens) and plugging in the charger show a slim pop-up with an icon and level bar.
-- Tailored notices: battery low (20/10/5%), Bluetooth device connected (with its battery when the device reports it), Wi-Fi connected, and charging, as a slim pill with an icon, text and a level ring. Click a notice to open its Settings page (battery, Bluetooth, Wi-Fi).
-- Clicks step through: bar → now-playing pill → full card → opens the playing app. Moving the mouse away collapses it.
-- Hides itself while a fullscreen game, video or presentation is in front, and does no work while hidden.
-- Volume pop-up follows the current output device, so switching to Bluetooth buds keeps working.
-- Right-click: quit.
+- Clicks step through stages: bar → pill → card. Right-click goes back a stage. Moving the mouse away collapses a pill to the bar; a card you opened stays until you close it.
+- Every pill and card is floating glass with a soft inner light in its source's colour (album, app, notice). Text is set in Inter (bundled, SIL Open Font License).
+- Fullscreen games, videos and presentations: the island stays the idle bar.
+
+### Music
+- Pill: album art and a moving waveform. With nothing playing, the pill is a clock (time left, date right).
+- Card: art, title, artist, controls, and a progress bar in the album colour with a light running along it. Click or drag the bar to seek. Only a click on the album art brings the playing app forward.
+- Synced lyrics from [LRCLIB](https://lrclib.net) (it receives the title and artist) slide in beside the title as a three-line list that scrolls with the song; the previous and next lines are faded.
+- Minimize the window that's playing: a drop of light flows from its taskbar button into the bar, which opens into the pill.
+
+### Notifications and notices
+- New Windows notifications drop down as a pill for 5 seconds (hover keeps them). Click to open the card, click the card to open the app, right-click to dismiss; they slide up into the edge when they leave. Windows asks once for notification access; turn off "Show notification banners" in Settings > System > Notifications to avoid doubles.
+- Tailored designs: messages (sender + bubble), mail (sender, subject, preview), calendar (time + countdown), calls, browser push (site), screenshots (the snip as a thumbnail), Logitech G HUB DPI, and a generic card. Windows only gives the island a notification's text and app icon, so images inside toasts, toast buttons and inline replies aren't available.
+- Volume (card: slider, mute, switch output device), brightness (laptop panels), charging / battery low, Bluetooth connected (with battery when reported) and Wi-Fi connected show a pill; click it for its card.
+- Stacking: while a notification or notice is up, the music pill sits below it. Click either one to open its card in place.
 
 ## Run
 
-Needs Windows 10 2004+ (Windows 11 recommended), the .NET 8 SDK or newer, and Visual Studio 2022 with the ".NET desktop" and "Windows App SDK" workloads.
+Needs Windows 10 2004+ (Windows 11 recommended) and the .NET 8 SDK or newer. Visual Studio is optional: the project builds with the dotnet CLI (`EnableMsixTooling`).
 
 ```powershell
 cd src/DynamicIsland
-dotnet run
+dotnet build -c Release -p:Platform=x64 -r win-x64
 ```
 
-Or open `src/DynamicIsland/DynamicIsland.csproj` in Visual Studio, pick x64, and press F5.
+The app is self-contained for the Windows App SDK; run `bin\x64\Release\net8.0-windows10.0.22621.0\win-x64\DynamicIsland.exe`. It registers itself to start at sign-in and to restart after a crash. Quit it from Task Manager.
+
+Unsigned builds are blocked while Windows Smart App Control is on.
 
 ## How the glass works
 
