@@ -31,6 +31,9 @@ sealed class FlowWindow : Window
     bool _running;
 
     public event Action? Arrived;
+    /// <summary>Just before the drop touches the island, so it can reach out to meet it.</summary>
+    public event Action? Nearing;
+    bool _neared;
 
     public FlowWindow()
     {
@@ -65,13 +68,16 @@ sealed class FlowWindow : Window
         AppWindow.Show(false); // don't take focus from the app
         Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
         _clock.Restart();
+        _neared = false;
         if (!_running) CompositionTarget.Rendering += Tick;
         _running = true;
     }
 
     void Tick(object? sender, object e)
     {
+        if (!_neared && _clock.Elapsed.TotalSeconds > Duration - 0.18) { _neared = true; Nearing?.Invoke(); }
         if (_clock.Elapsed.TotalSeconds < Duration) { _canvas.Invalidate(); return; }
+        _neared = false;
         CompositionTarget.Rendering -= Tick;
         _running = false;
         AppWindow.Hide();

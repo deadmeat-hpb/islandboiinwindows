@@ -104,6 +104,21 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
         catch (Exception ex) { Debug.WriteLine($"Couldn't open {id}: {ex.Message}"); }
     }
 
+    /// <summary>The playing app's window (the one <see cref="OpenApp"/> brings forward), or 0. Enumerates windows: call off the UI thread.</summary>
+    public nint Window(string title) => _session?.SourceAppUserModelId is { Length: > 0 } id ? FindWindow(id, title) : 0;
+
+    /// <summary>True when the playing app accepts seeking.</summary>
+    public bool CanSeek => _end > TimeSpan.Zero && _session?.GetPlaybackInfo()?.Controls?.IsPlaybackPositionEnabled == true;
+
+    /// <summary>Jumps to <paramref name="fraction"/> of the track.</summary>
+    public void Seek(double fraction)
+    {
+        if (!CanSeek) return;
+        var target = TimeSpan.FromTicks((long)(_end.Ticks * Math.Clamp(fraction, 0, 1)));
+        _ = _session!.TryChangePlaybackPositionAsync(target.Ticks);
+        (_position, _positionAt) = (target, DateTimeOffset.Now); // show it right away; the app's timeline update follows
+    }
+
     void Post(Action a) => ui.TryEnqueue(() => a());
 
     void Attach()

@@ -50,8 +50,8 @@ public sealed class IslandWindow : Window
     nint _monitor;
     int _monLeft, _monTop, _monW, _monH, _stripH;
     FlowWindow? _flow;
-    bool _wasPlaying;
-    double _pulseAt = -10, _stoppedAt = -10;
+    double _pulseAt = -10, _reachAt = -10, _rippleAt = -10, _artInAt = -10, _holdUntil; // minimize-flow arrival animation
+    Native.WinEventProc? _minimizeProc; // field so the hook callback isn't garbage-collected
     float _s = 1; // physical px per DIP; all island math is in physical px
 
     Mode _mode = Mode.Idle;
@@ -73,7 +73,7 @@ public sealed class IslandWindow : Window
         _root.PointerPressed += OnPressed;
         _root.PointerMoved += OnMoved;
         _root.PointerReleased += OnReleased;
-        _root.PointerCaptureLost += (_, _) => EndPress(click: false);
+        _root.PointerCaptureLost += (_, _) => { if (MediaView.Scrub is not null) { MediaView.Scrub = null; _dirty = true; } EndPress(click: false); };
         _root.RightTapped += (_, _) => OnRightClick(); // back one stage; quit from Task Manager
         Content = _root;
 
@@ -85,18 +85,23 @@ public sealed class IslandWindow : Window
         {
             if (_mode is Mode.Expanded or Mode.Idle or Mode.Hover) SetMode(_mode); // card size depends on whether anything is playing; the bar shows the clock when nothing is
             double now = _clock.Elapsed.TotalSeconds;
-            // Only a real start: not music already playing at launch, and not the brief pause apps make when skipping songs.
-            if (_media.Playing && !_wasPlaying && now > 3 && now - _stoppedAt > 3 && !_fullscreen) FlowIn();
-            if (!_media.Playing && _wasPlaying) _stoppedAt = now;
-            _wasPlaying = _media.Playing;
             _dirty = true;
         };
         _media.Start();
+
+        // The light flow plays when the window that's playing gets minimized: the music "drops" into the island.
+        // Out-of-context WinEvent hook: Windows calls us only on minimize, no polling.
+        _minimizeProc = async (_, _, hwnd, idObject, _, _, _) =>
+        {
+            if (idObject != 0 || !_media.Playing || _fullscreen) return; // OBJID_WINDOW only
+            string title = _media.Title;
+            if (await Task.Run(() => _media.Window(title)) == hwnd) FlowIn(); // same window the card's art click brings forward
+        };
+        Native.SetWinEventHook(Native.EVENT_SYSTEM_MINIMIZESTART, Native.EVENT_SYSTEM_MINIMIZESTART, 0, _minimizeProc, 0, 0, Native.WINEVENT_OUTOFCONTEXT);
         _notes.Start(DispatcherQueue);
         var hud = _system = new SystemHud(DispatcherQueue);
         hud.Changed += e =>
-        {
-            if (_fullscreen || _mode == Mode.Notify || _mode == Mode.Expanded && e.Text.Length == 0) return; // level bars don't cover a card; battery/Bluetooth/Wi-Fi notices do
+        {            if (_fullscreen || _mode == Mode.Notify || _mode == Mode.Expanded && e.Text.Length == 0) return; // level bars don't cover a card; battery/Bluetooth/Wi-Fi notices do
             if (_mode == Mode.Expanded) _reopen = true; // the card stays open now, so come back to it after the notice
             (_hud, _hudUntil) = (e, _clock.Elapsed.TotalSeconds + e.Seconds);
             SetMode(Mode.Hud); // re-run: a notice is wider than a level bar
@@ -133,7 +138,21 @@ public sealed class IslandWindow : Window
         if (_flow is null)
         {
             _flow = new FlowWindow();
-            _flow.Arrived += () => { _pulseAt = _clock.Elapsed.TotalSeconds; _w.Velocity += 500 * _s; _dirty = true; }; // a little gulp + glow
+            _flow.Nearing += () => { _reachAt = _clock.Elapsed.TotalSeconds; _dirty = true; SetFast(true); }; // the underside reaches for the drop
+            _flow.Arrived += () =>
+            {
+                double now = _clock.Elapsed.TotalSeconds;
+                (_pulseAt, _rippleAt) = (now, now);
+                if (_mode is Mode.Idle or Mode.Hover && _media.HasSession && !_fullscreen) // swallow the drop and swell into the pill
+                {
+                    _pinned = true;
+                    _holdUntil = now + 3; // the mouse is down at the taskbar: keep the pill up a moment before the idle rule takes it back
+                    SetMode(Mode.Compact);
+                    _w.Velocity += 900 * _s; _h.Velocity += 500 * _s; // a bit bouncier than a click open
+                    _artInAt = now;
+                }
+                _dirty = true;
+            };
         }
         var a = _media.Accent;
         var color = Microsoft.UI.ColorHelper.FromArgb(255, (byte)((255 + a.R) / 2), (byte)((255 + a.G) / 2), (byte)((255 + a.B) / 2));
@@ -239,7 +258,7 @@ public sealed class IslandWindow : Window
         if (!_fullscreen) UpdateHover(now);
         // Stacking: while a notification or notice is up, the playing media drops below it as its own pill, then pushes back up.
         _stack.Target = _media.Playing && _mode is Mode.Notify or Mode.Hud ? _top.Target + _h.Target + 8 * _s : 0;
-        bool animating = !_stack.Settled || _pressed || now - _pulseAt < 0.7 || _media.TransitionT < 1 || _media.ArtFadeT < 1 || !(_x.Settled && _w.Settled && _h.Settled && _top.Settled);
+        bool animating = !_stack.Settled || _pressed || now - _pulseAt < 0.9 || now - _reachAt < 0.3 || _media.TransitionT < 1 || _media.ArtFadeT < 1 || !(_x.Settled && _w.Settled && _h.Settled && _top.Settled);
         SetFast(animating);
 
         // Background refraction only refreshes at the slow tick rate when idle, and freezes in battery saver.
@@ -292,7 +311,7 @@ public sealed class IslandWindow : Window
         float m = 12 * _s;
         bool near = px >= cx - w / 2 - m && px <= cx + w / 2 + m && py <= top + h + m && py >= -m;
 
-        if (!near && _mode != Mode.Expanded) _pinned = false;
+        if (!near && _mode != Mode.Expanded && now > _holdUntil) _pinned = false;
         if (_mode == Mode.Expanded) { } // stays open until clicked
         else if (_mode == Mode.Notify)
         {
@@ -308,8 +327,7 @@ public sealed class IslandWindow : Window
     void ShowNextNote(double now, bool near)
     {
         if (_notes.Pending.TryDequeue(out var next))
-        {
-            (_note, _noteUntil) = (next, now + 5);
+        {            (_note, _noteUntil) = (next, now + 5);
             SetMode(Mode.Notify);
             _w.Velocity += 600 * _s; // arrival bounce
         }
@@ -354,9 +372,19 @@ public sealed class IslandWindow : Window
     float PointerX(PointerRoutedEventArgs e) => (float)e.GetCurrentPoint(_root).Position.X * _s;
     float PointerY(PointerRoutedEventArgs e) => (float)e.GetCurrentPoint(_root).Position.Y * _s;
 
+    Windows.Foundation.Rect IslandRect() { var (cx, top, w, h) = Shape(); return new(cx - w / 2, top, w, h); }
+
     void OnPressed(object sender, PointerRoutedEventArgs e)
     {
         if (!e.GetCurrentPoint(_root).Properties.IsLeftButtonPressed) return;
+        if (_mode == Mode.Expanded && _media.HasSession && _media.CanSeek
+            && MediaView.HitProgress(IslandRect(), _s, new(PointerX(e), PointerY(e))) is float f) // grab the progress bar: scrub, seek on release
+        {
+            MediaView.Scrub = f;
+            _root.CapturePointer(e.Pointer);
+            _dirty = true;
+            return;
+        }
         _pressed = true;
         _dragging = false;
         _pressX = PointerX(e);
@@ -369,9 +397,16 @@ public sealed class IslandWindow : Window
 
     void OnMoved(object sender, PointerRoutedEventArgs e)
     {
+        if (MediaView.Scrub is not null)
+        {
+            var bar = MediaView.ProgressBar(IslandRect(), _s);
+            MediaView.Scrub = (float)Math.Clamp((PointerX(e) - bar.X) / bar.Width, 0, 1);
+            _dirty = true;
+            return;
+        }
         if (!_pressed) return;
         float x = PointerX(e);
-        if (!_dragging && MathF.Abs(x - _pressX) > (_mode == Mode.Expanded ? 24 : 5) * _s) // the open card needs a deliberate drag so wobbly clicks still count as clicks
+        if (!_dragging && MathF.Abs(x - _pressX) > (_mode is Mode.Expanded or Mode.Notify ? 24 : 5) * _s) // cards need a deliberate drag so wobbly clicks still count as clicks
         {
             _dragging = true;
             if (_mode == Mode.Idle) SetMode(Mode.Hover);
@@ -384,6 +419,7 @@ public sealed class IslandWindow : Window
 
     void OnReleased(object sender, PointerRoutedEventArgs e)
     {
+        if (MediaView.Scrub is float f) { MediaView.Scrub = null; _media.Seek(f); _dirty = true; }
         EndPress(click: true);
         _root.ReleasePointerCapture(e.Pointer);
     }
@@ -403,8 +439,7 @@ public sealed class IslandWindow : Window
     }
 
     void OnClick()
-    {
-        if (_fullscreen) return; // idle bar only while something is fullscreen
+    {        if (_fullscreen) return; // idle bar only while something is fullscreen
         if (_stack.Value > 2 * _s && _pressY > _stack.Value) { _media.OpenApp(); return; } // the stacked media pill
         if (_mode == Mode.Notify && _note is not null)
         {
@@ -439,7 +474,11 @@ public sealed class IslandWindow : Window
                 SetMode(Mode.Compact);
                 break;
             case Mode.Expanded:
-                if (_media.HasSession) _media.OpenApp();
+                if (_media.HasSession) // only the album art opens the playing app; the rest of the card ignores left clicks
+                {
+                    if (!MediaView.ArtRect(IslandRect(), _s).Contains(new Windows.Foundation.Point(_pressX, _pressY))) break;
+                    _media.OpenApp();
+                }
                 _pinned = false;
                 SetMode(RestMode(near: true));
                 break;
@@ -486,8 +525,14 @@ public sealed class IslandWindow : Window
         var a = _media.PrevAccent; var b = _media.Accent;
         var glow = Microsoft.UI.ColorHelper.FromArgb(255, (byte)(a.R + (b.R - a.R) * t), (byte)(a.G + (b.G - a.G) * t), (byte)(a.B + (b.B - a.B) * t));
         float glowStrength = _media.Playing && _mode is Mode.Compact or Mode.Expanded ? 1 : 0; // steady and faint: a pulse read as gimmicky
-        glowStrength = MathF.Max(glowStrength, 2f * MathF.Max(0, 1 - (float)(_clock.Elapsed.TotalSeconds - _pulseAt) / 0.7f)); // brief light as the flow lands
-        float sag = Math.Clamp(_h.Velocity * 0.012f, 0, 20 * _s); // melting: the bottom drips down while the island grows
+        double clock = _clock.Elapsed.TotalSeconds;
+        glowStrength = MathF.Max(glowStrength, 0.6f * MathF.Max(0, 1 - (float)(clock - _pulseAt) / 0.7f)); // faint light as the flow lands
+        // Melting: the bottom drips down while the card grows. Not for the pill: there the drop read as a second pill popping out underneath.
+        float sag = _mode is Mode.Expanded or Mode.Notify ? Math.Clamp(_h.Velocity * 0.012f, 0, 20 * _s) : 0;
+        float reach = (float)Math.Clamp((clock - _reachAt) / 0.25, 0, 1);
+        if (reach is > 0 and < 1) sag = MathF.Max(sag, 8 * _s * MathF.Sin(MathF.PI * reach)); // the underside bulges toward the incoming drop
+        float ripple = (float)((clock - _rippleAt) / 0.7);
+        MediaView.ArtIn = (float)Math.Clamp((clock - _artInAt - 0.15) / 0.35, 0, 1); // the art arrives last
         Glass.Draw(ds, _capture?.Image, _canvasLeftPx, cx, top, w, h, _s, expand, glow, glowStrength, sag, rect =>
         {
             if (compactAlpha > 0) MediaView.DrawCompact(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, compactAlpha);
@@ -495,6 +540,12 @@ public sealed class IslandWindow : Window
             if (note is not null && cardAlpha > 0) NotificationView.Draw(ds, rect, _s, note, cardAlpha);
             if (hudEvent is not null && hudAlpha > 0) HudView.Draw(ds, rect, _s, hudEvent, hudAlpha);
             if (clockAlpha > 0) DrawClock(ds, rect, clockAlpha);
+            if (ripple is > 0 and < 1) // soft ring running out along the glass from where the drop hit
+            {
+                float e = 1 - (1 - ripple) * (1 - ripple), rx = (float)rect.Width * 0.65f * e;
+                ds.DrawEllipse((float)(rect.X + rect.Width / 2), (float)rect.Bottom, rx, rx * 0.4f,
+                    Microsoft.UI.ColorHelper.FromArgb((byte)(60 * (1 - ripple)), 255, 255, 255), 1.5f * _s);
+            }
         });
     }
 
@@ -503,12 +554,12 @@ public sealed class IslandWindow : Window
         var now = DateTime.Now;
         using var format = new Microsoft.Graphics.Canvas.Text.CanvasTextFormat
         {
-            FontFamily = "Segoe UI Variable Text", FontSize = (_mode == Mode.Hover ? 12 : 11) * _s, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.SemiBold), FontSize = (_mode == Mode.Hover ? 12 : 11) * _s, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             HorizontalAlignment = Microsoft.Graphics.Canvas.Text.CanvasHorizontalAlignment.Center, VerticalAlignment = Microsoft.Graphics.Canvas.Text.CanvasVerticalAlignment.Center,
             WordWrapping = Microsoft.Graphics.Canvas.Text.CanvasWordWrapping.NoWrap,
         };
         string text = $"{now:HH:mm}  ·  {now.ToString("ddd M/d", CultureInfo.CurrentCulture)}";
-        ds.DrawText(text, rect, Microsoft.UI.ColorHelper.FromArgb((byte)(210 * alpha), 255, 255, 255), format);
+        Fonts.DrawTabular(ds, text, rect, Microsoft.UI.ColorHelper.FromArgb((byte)(210 * alpha), 255, 255, 255), format);
     }
 
     static float LoadPosition()

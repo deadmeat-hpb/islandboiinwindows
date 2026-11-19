@@ -88,12 +88,12 @@ static class NotificationView
 
         using var title = new CanvasTextFormat
         {
-            FontFamily = "Segoe UI Variable Display", FontSize = 15 * s, FontWeight = FontWeights.SemiBold,
+            FontFamily = Fonts.Inter(FontWeights.SemiBold), FontSize = 15 * s, FontWeight = FontWeights.SemiBold,
             WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character,
         };
         using var body = new CanvasTextFormat
         {
-            FontFamily = "Segoe UI Variable Text", FontSize = 13 * s,
+            FontFamily = Fonts.Inter(FontWeights.Normal), FontSize = 13 * s,
             WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character,
         };
         float tx = x + 70 * s, tw = w - 86 * s;

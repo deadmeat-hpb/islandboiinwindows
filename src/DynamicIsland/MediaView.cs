@@ -20,8 +20,8 @@ static class MediaView
     /// <summary>Compact pill: album art on the left, a little waveform on the right.</summary>
     public static void DrawCompact(CanvasDrawingSession ds, Rect r, float s, MediaSource m, double time, float a)
     {
-        float size = (float)r.Height - 10 * s;
-        Slide(m, 10 * s, a, (dx, al, art, _, _) => DrawArt(ds, art, new Rect(r.X + 7 * s + dx, r.Y + 5 * s, size, size), 5 * s, art == m.Art ? al * m.ArtFadeT : al));
+        float full = (float)r.Height - 10 * s, size = full * (0.8f + 0.2f * ArtIn), inset = (full - size) / 2;
+        Slide(m, 10 * s, a * ArtIn, (dx, al, art, _, _) => DrawArt(ds, art, new Rect(r.X + 7 * s + inset + dx, r.Y + 5 * s + inset, size, size), 5 * s, art == m.Art ? al * m.ArtFadeT : al));
 
         float cy = (float)(r.Y + r.Height / 2), x0 = (float)r.Right - 14 * s - 4 * 6 * s;
         for (int i = 0; i < 4; i++)
@@ -37,19 +37,19 @@ static class MediaView
         float x = (float)r.X, y = (float)r.Y, w = (float)r.Width;
         using var title = new CanvasTextFormat
         {
-            FontFamily = "Segoe UI Variable Display", FontSize = 17 * s, FontWeight = FontWeights.SemiBold,
+            FontFamily = Fonts.Inter(FontWeights.SemiBold), FontSize = 17 * s, FontWeight = FontWeights.SemiBold,
             WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character,
         };
         using var sub = new CanvasTextFormat
         {
-            FontFamily = "Segoe UI Variable Text", FontSize = 14 * s,
+            FontFamily = Fonts.Inter(FontWeights.Normal), FontSize = 14 * s,
             WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character,
         };
 
         if (!m.HasSession)
         {
             var now = DateTime.Now; // nothing playing: the card is a clock
-            ds.DrawText(now.ToString("HH:mm"), new Rect(x + 24 * s, y + 24 * s, w - 48 * s, 26 * s), White(a), title);
+            Fonts.DrawTabular(ds, now.ToString("HH:mm"), new Rect(x + 24 * s, y + 24 * s, w - 48 * s, 26 * s), White(a), title);
             ds.DrawText(now.ToString("D", System.Globalization.CultureInfo.CurrentCulture), new Rect(x + 24 * s, y + 52 * s, w - 48 * s, 22 * s), White(0.65f * a), sub);
             return;
         }
@@ -60,7 +60,8 @@ static class MediaView
         TitleScrolls = false;
         Slide(m, 28 * s, a, (dx, al, art, t, ar) =>
         {
-            DrawArt(ds, art, new Rect(x + 20 * s + dx, y + 20 * s, 64 * s, 64 * s), 12 * s, art == m.Art ? al * m.ArtFadeT : al);
+            var ar0 = ArtRect(r, s);
+            DrawArt(ds, art, new Rect(ar0.X + dx, ar0.Y, ar0.Width, ar0.Height), 12 * s, art == m.Art ? al * m.ArtFadeT : al);
             Marquee(ds, t, new Rect(x + 98 * s + dx, y + 28 * s, tw, 24 * s), White(al), title, time, s);
             ds.DrawText(ar, new Rect(x + 98 * s + dx, y + 54 * s, tw, 20 * s), White(0.65f * al), sub);
         });
@@ -68,16 +69,18 @@ static class MediaView
         {
             using var lyricFormat = new CanvasTextFormat
             {
-                FontFamily = "Segoe UI Variable Text", FontSize = 13 * s, FontWeight = FontWeights.SemiBold,
+                FontFamily = Fonts.Inter(FontWeights.SemiBold), FontSize = 13 * s, FontWeight = FontWeights.SemiBold,
                 WordWrapping = CanvasWordWrapping.Wrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Word,
                 HorizontalAlignment = CanvasHorizontalAlignment.Right, VerticalAlignment = CanvasVerticalAlignment.Center,
             };
             ds.DrawText(lyric, new Rect(x + 98 * s + tw + 12 * s, y + 20 * s, textW - tw - 12 * s, 52 * s), White(0.9f * a), lyricFormat); // beside the title, above the progress bar
         }
 
-        float px = x + 98 * s, pw = w - 118 * s, py = y + 80 * s; // beside the art, bottom-aligned with it
+        var bar = ProgressBar(r, s);
+        float px = (float)bar.X, pw = (float)bar.Width, py = (float)bar.Y, f = Scrub ?? (float)m.Progress;
         ds.FillRoundedRectangle(px, py, pw, 4 * s, 2 * s, 2 * s, White(0.25f * a));
-        ds.FillRoundedRectangle(px, py, pw * (float)m.Progress, 4 * s, 2 * s, 2 * s, White(0.9f * a));
+        ds.FillRoundedRectangle(px, py, pw * f, 4 * s, 2 * s, 2 * s, White(0.9f * a));
+        if (Scrub is not null) ds.FillCircle(px + pw * f, py + 2 * s, 6 * s, White(a)); // thumb while scrubbing
 
         using var icons = new CanvasTextFormat
         {
@@ -120,6 +123,26 @@ static class MediaView
             ds.DrawTextLayout(layout, (float)box.X - offset, (float)box.Y, c);
             ds.DrawTextLayout(layout, (float)box.X - offset + loop, (float)box.Y, c);
         }
+    }
+
+    /// <summary>Where the progress bar is being dragged to (0..1), or null when it isn't.</summary>
+    public static float? Scrub;
+
+    /// <summary>0..1 fade/scale-in of the pill's album art after the minimize flow lands; 1 otherwise.</summary>
+    public static float ArtIn = 1;
+
+    /// <summary>The visible progress bar in the expanded card: beside the art, bottom-aligned with it.</summary>
+    public static Rect ProgressBar(Rect r, float s) => new(r.X + 98 * s, r.Y + 80 * s, r.Width - 118 * s, 4 * s);
+
+    /// <summary>The album art in the expanded card.</summary>
+    public static Rect ArtRect(Rect r, float s) => new(r.X + 20 * s, r.Y + 20 * s, 64 * s, 64 * s);
+
+    /// <summary>0..1 along the progress bar if <paramref name="p"/> is on it (with a few px of slack), else null.</summary>
+    public static float? HitProgress(Rect r, float s, Vector2 p)
+    {
+        var bar = ProgressBar(r, s);
+        if (p.X < bar.X - 6 * s || p.X > bar.Right + 6 * s || p.Y < bar.Y - 8 * s || p.Y > bar.Bottom + 8 * s) return null;
+        return (float)Math.Clamp((p.X - bar.X) / bar.Width, 0, 1);
     }
 
     /// <summary>0 = previous, 1 = play/pause, 2 = next, -1 = none.</summary>

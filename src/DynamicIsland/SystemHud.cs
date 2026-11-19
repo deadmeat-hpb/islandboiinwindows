@@ -165,7 +165,7 @@ static class HudView
         ds.DrawText(e.Glyph, new Rect(x + 8 * s, cy - 14 * s, 28 * s, 28 * s), tint, icon);
         using var label = new CanvasTextFormat
         {
-            FontFamily = "Segoe UI Variable Text", FontSize = 13 * s, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.SemiBold), FontSize = 13 * s, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             VerticalAlignment = CanvasVerticalAlignment.Center,
             WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character,
         };
