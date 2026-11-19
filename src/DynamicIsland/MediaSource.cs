@@ -90,9 +90,9 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
         if (string.IsNullOrEmpty(id)) return;
         try
         {
-            // Bring a running instance forward ourselves: launching a running packaged app via explorer doesn't pass the foreground lock.
-            var window = Process.GetProcesses().Where(p => p.MainWindowHandle != 0 && (AppIdOf(p) == id || id.Equals(p.ProcessName + ".exe", StringComparison.OrdinalIgnoreCase)))
-                .Select(p => p.MainWindowHandle).FirstOrDefault();
+            // Bring the existing window forward instead of launching a new one. Browsers have many windows, so prefer the one
+            // whose title shows the song/video (a YouTube tab puts the video title in the window title).
+            var window = FindWindow(id, Title);
             if (window != 0)
             {
                 if (Native.IsIconic(window)) Native.ShowWindow(window, 9 /* SW_RESTORE */); // restoring a non-minimized window would un-maximize it
@@ -197,6 +197,33 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
     }
 
     /// <summary>A packaged app's AppUserModelId ("Family!App"), or null for plain desktop processes and ones we can't open.</summary>
+    /// <summary>The playing app's visible window: one titled with the media first, then any window of that app.</summary>
+    static nint FindWindow(string id, string title)
+    {
+        string name = Path.GetFileNameWithoutExtension(id.Split('!')[0]); // "chrome.exe" → "chrome"; "Chrome", "MSEdge", "Spotify.exe" work too
+        var appIds = new Dictionary<uint, bool>();
+        nint titled = 0, titledAny = 0, any = 0;
+        Native.EnumWindows((hwnd, _) =>
+        {
+            if (!Native.IsWindowVisible(hwnd) || Native.GetWindowTextLength(hwnd) == 0) return true;
+            var sb = new System.Text.StringBuilder(512);
+            Native.GetWindowText(hwnd, sb, sb.Capacity);
+            bool hasTitle = title.Length > 2 && sb.ToString().Contains(title, StringComparison.OrdinalIgnoreCase);
+            Native.GetWindowThreadProcessId(hwnd, out uint pid);
+            if (!appIds.TryGetValue(pid, out bool mine))
+            {
+                try { using var p = Process.GetProcessById((int)pid); mine = p.ProcessName.Equals(name, StringComparison.OrdinalIgnoreCase) || AppIdOf(p) == id; }
+                catch { mine = false; }
+                appIds[pid] = mine;
+            }
+            if (mine && hasTitle) { titled = hwnd; return false; }
+            if (hasTitle && titledAny == 0) titledAny = hwnd;
+            if (mine && any == 0) any = hwnd; // windows enumerate front to back, so this is the app's most recent window
+            return true;
+        }, 0);
+        return titled != 0 ? titled : any != 0 ? any : titledAny;
+    }
+
     static string? AppIdOf(Process p)
     {
         try

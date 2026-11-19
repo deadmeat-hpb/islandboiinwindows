@@ -32,5 +32,11 @@ static class Native
     [DllImport("user32.dll", EntryPoint = "GetMonitorInfoW")] public static extern bool GetMonitorInfo(nint hmon, ref MONITORINFO mi);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(nint hwnd);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern int RegisterApplicationRestart(string? args, uint flags); // relaunch after a crash or hang
+    public delegate bool EnumWindowsProc(nint hwnd, nint lParam);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc proc, nint lParam);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(nint hwnd);
+    [DllImport("user32.dll")] public static extern int GetWindowTextLength(nint hwnd);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(nint hwnd, System.Text.StringBuilder text, int max);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(nint hwnd, out uint pid);
     [DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(nint hwnd, int attr, ref int value, int size);
 }
