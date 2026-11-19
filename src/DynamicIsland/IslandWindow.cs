@@ -151,9 +151,9 @@ public sealed class IslandWindow : Window
         _mode = mode;
         (_w.Target, _h.Target, _top.Target) = mode switch
         {
-            Mode.Idle => (84 * _s, 6 * _s, 5 * _s),
-            Mode.Hover => (124 * _s, 14 * _s, 6 * _s),
-            Mode.Compact => (210 * _s, 30 * _s, 6 * _s),
+            Mode.Idle => (84 * _s, 8 * _s, 0f),     // resting shapes hang from the screen edge (see Glass.Attached)
+            Mode.Hover => (124 * _s, 16 * _s, 0f),
+            Mode.Compact => (210 * _s, 32 * _s, 0f),
             Mode.Notify => (360 * _s, 72 * _s, 8 * _s),
             Mode.Hud => ((_hud?.Text.Length > 0 ? 300 : 240) * _s, 32 * _s, 6 * _s), // notices are wider than level bars
             _ when _media.HasSession => (400 * _s, 150 * _s, 10 * _s),

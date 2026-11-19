@@ -27,12 +27,13 @@ static class Glass
         ds.Transform = Matrix3x2.CreateTranslation(-originX, 0) * Matrix3x2.CreateScale(1f / s); // draw in screen pixels; originX = where the canvas sits
         var rect = new Rect(cx - w / 2, top, w, h);
         float r = MathF.Min(h / 2, 30 * s);
-        using var shape = RoundRect(ds, rect, r, 0);
+        float attach = Math.Clamp(1 - top / (4 * s), 0, 1); // resting at the screen edge: melt into it with curved shoulders
+        using var shape = attach > 0 ? Attached(ds, rect, r, 12 * s * attach) : RoundRect(ds, rect, r, 0);
 
         if (expand > 0) DrawShadow(ds, shape, s, expand);
         if (glowStrength > 0) DrawGlow(ds, shape, rect, s, glow, glowStrength);
 
-        if (background is not null) DrawRefraction(ds, background, rect, r, s, expand);
+        if (background is not null) DrawRefraction(ds, background, shape, rect, r, s, expand);
         else ds.FillGeometry(shape, Gray(200, 22));
 
         ds.FillGeometry(shape, Gray((int)(16 + 70 * expand), 12)); // light tint, darker when expanded for legible text
@@ -47,7 +48,7 @@ static class Glass
         }
         if (content is not null)
             using (ds.CreateLayer(1f, shape)) content(rect);
-        DrawRim(ds, shape, rect, r, s);
+        DrawRim(ds, shape, rect, r, s, inner: attach == 0);
     }
 
     static Color WithAlpha(Color c, float a) => ColorHelper.FromArgb((byte)Math.Clamp(a * 255, 0, 255), c.R, c.G, c.B);
@@ -69,7 +70,7 @@ static class Glass
         ds.DrawImage(shadow, 0, 6 * s);
     }
 
-    static void DrawRefraction(CanvasDrawingSession ds, ICanvasImage background, Rect rect, float r, float s, float expand)
+    static void DrawRefraction(CanvasDrawingSession ds, ICanvasImage background, CanvasGeometry shape, Rect rect, float r, float s, float expand)
     {
         // Blur once into a cached bitmap; the lens rings below all sample from it instead of re-running the blur.
         float pad = 40 * s;
@@ -99,8 +100,8 @@ static class Glass
         for (int i = 0; i < rings; i++)
         {
             float t = 1 - (i + 0.5f) / rings; // 1 at the edge, 0 inside
-            using var clip = RoundRect(ds, rect, r, band * i / rings);
-            DrawLens(ds, glass, origin, clip, c, hw, hh, band * 1.6f * t * t);
+            using var clip = i == 0 ? null : RoundRect(ds, rect, r, band * i / rings);
+            DrawLens(ds, glass, origin, clip ?? shape, c, hw, hh, band * 1.6f * t * t); // outer ring fills the whole shape, shoulders included
         }
 
         // Body: a touch of magnification, like thick glass.
@@ -121,7 +122,7 @@ static class Glass
         using (ds.CreateLayer(1f, clip)) ds.DrawImage(lens);
     }
 
-    static void DrawRim(CanvasDrawingSession ds, CanvasGeometry shape, Rect rect, float r, float s)
+    static void DrawRim(CanvasDrawingSession ds, CanvasGeometry shape, Rect rect, float r, float s, bool inner)
     {
         using var brush = new CanvasLinearGradientBrush(ds,
         [
@@ -135,8 +136,25 @@ static class Glass
             EndPoint = new Vector2((float)rect.Right, (float)rect.Bottom),
         };
         ds.DrawGeometry(shape, brush, 1.1f * s);
-        using var inner = RoundRect(ds, rect, r, 1.5f * s);
-        ds.DrawGeometry(inner, White(28), 1f * s);
+        if (!inner) return; // the inner highlight would draw round top corners inside the shoulders
+        using var line = RoundRect(ds, rect, r, 1.5f * s);
+        ds.DrawGeometry(line, White(28), 1f * s);
+    }
+
+    /// <summary>
+    /// The island hanging from the top edge: flat top, rounded bottom, and concave shoulders <paramref name="f"/> wide
+    /// that curve out into the screen edge, so it looks poured out of the top bar instead of floating under it.
+    /// </summary>
+    static CanvasGeometry Attached(ICanvasResourceCreator rc, Rect rect, float r, float f)
+    {
+        float left = (float)rect.Left, right = (float)rect.Right, top = (float)rect.Top, fv = MathF.Max((float)rect.Height - r, 1);
+        using var body = CanvasGeometry.CreateRoundedRectangle(rc, rect, r, r);
+        using var band = CanvasGeometry.CreateRectangle(rc, left - f, top, right - left + 2 * f, fv); // squares off the top corners
+        using var l = CanvasGeometry.CreateEllipse(rc, left - f, top + fv, f, fv);                      // ...and carves the shoulders
+        using var rr = CanvasGeometry.CreateEllipse(rc, right + f, top + fv, f, fv);
+        using var a = band.CombineWith(l, Matrix3x2.Identity, CanvasGeometryCombine.Exclude);
+        using var b = a.CombineWith(rr, Matrix3x2.Identity, CanvasGeometryCombine.Exclude);
+        return body.CombineWith(b, Matrix3x2.Identity, CanvasGeometryCombine.Union);
     }
 
     static CanvasGeometry RoundRect(ICanvasResourceCreator rc, Rect rect, float r, float inset)
