@@ -37,7 +37,7 @@ public sealed class IslandWindow : Window
     readonly MediaSource _media;
     readonly NotificationSource _notes = new(CanvasDevice.GetSharedDevice());
     IslandNotification? _note;
-    double _noteUntil, _hudUntil;
+    double _noteUntil, _hudUntil, _lastClickAt, _collapseAt = -1;
     HudEvent? _hud;
     DispatcherQueueTimer _slowTick;
     bool _fast;
@@ -235,6 +235,7 @@ public sealed class IslandWindow : Window
         float m = 12 * _s;
         bool near = px >= cx - w / 2 - m && px <= cx + w / 2 + m && py <= top + h + m && py >= -m;
 
+        if (_mode == Mode.Expanded && _collapseAt > 0 && now >= _collapseAt) { _collapseAt = -1; SetMode(RestMode(near)); }
         if (_mode == Mode.Expanded)
         {
             if (near) _leftAt = -1;
@@ -344,18 +345,30 @@ public sealed class IslandWindow : Window
             _noteUntil = 0; // closes on the next tick
             return;
         }
-        if (_mode != Mode.Expanded) { SetMode(Mode.Expanded); return; }
-        if (_media.HasSession)
+        if (_mode == Mode.Expanded && _media.HasSession)
         {
             var (cx, top, w, h) = Shape();
             switch (MediaView.HitButton(new Windows.Foundation.Rect(cx - w / 2, top, w, h), _s, new System.Numerics.Vector2(_pressX, _pressY)))
             {
-                case 0: _media.Previous(); return;
-                case 1: _media.TogglePlay(); return;
-                case 2: _media.Next(); return;
+                case 0: _media.Previous(); _lastClickAt = 0; return; // fast repeated skips aren't a double-click
+                case 1: _media.TogglePlay(); _lastClickAt = 0; return;
+                case 2: _media.Next(); _lastClickAt = 0; return;
             }
         }
-        SetMode(RestMode(near: true));
+
+        // Double-click opens the playing app. The first click already expanded the island, so a collapse waits briefly for a second click.
+        double now = _clock.Elapsed.TotalSeconds;
+        bool doubleClick = now - _lastClickAt < 0.35;
+        _lastClickAt = now;
+        if (doubleClick && _media.HasSession)
+        {
+            _collapseAt = -1;
+            _media.OpenApp();
+            SetMode(RestMode(near: true));
+            return;
+        }
+        if (_mode != Mode.Expanded) SetMode(Mode.Expanded);
+        else _collapseAt = now + 0.35;
     }
 
     void SnapX()

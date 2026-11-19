@@ -12,6 +12,7 @@ A Dynamic Island for Windows, with an Apple Liquid Glass look.
 - Notifications: new Windows notifications drop down from the island for 5 seconds (hover to keep one open, click to open the app). Windows asks once for notification access. To stop Windows' own pop-ups doubling up, turn off "Show notification banners" in Settings > System > Notifications.
 - Volume, brightness (laptop screens) and plugging in the charger show a slim pop-up with an icon and level bar.
 - Tailored notices: battery low (20/10/5%), Bluetooth device connected (with its battery when the device reports it), Wi-Fi connected, and charging, as a slim pill with an icon, text and a level ring.
+- Double-click the island while music plays to open the app that's playing.
 - Right-click: quit.
 
 ## Run

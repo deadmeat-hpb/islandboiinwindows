@@ -23,6 +23,8 @@ static class Native
     [DllImport("user32.dll")] public static extern int SetWindowRgn(nint hwnd, nint hrgn, bool redraw);
     [DllImport("gdi32.dll")] public static extern nint CreateRectRgn(int left, int top, int right, int bottom);
     [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
+    [DllImport("user32.dll")] public static extern bool ShowWindow(nint hwnd, int cmd);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(nint hwnd);
     [DllImport("user32.dll")] public static extern nint MonitorFromPoint(POINT pt, uint flags);
     [DllImport("user32.dll", EntryPoint = "GetMonitorInfoW")] public static extern bool GetMonitorInfo(nint hmon, ref MONITORINFO mi);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(nint hwnd);

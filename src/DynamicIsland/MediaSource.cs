@@ -80,6 +80,23 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
     public void Next() => _ = _session?.TrySkipNextAsync();
     public void Previous() => _ = _session?.TrySkipPreviousAsync();
 
+    /// <summary>Brings the playing app forward: its window if it's a running desktop app, else launches it by app id.</summary>
+    public void OpenApp()
+    {
+        string? id = _session?.SourceAppUserModelId;
+        if (string.IsNullOrEmpty(id)) return;
+        try
+        {
+            if (id.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) // plain desktop apps report their exe name
+            {
+                var window = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(id)).Select(p => p.MainWindowHandle).FirstOrDefault(h => h != 0);
+                if (window != 0) { Native.ShowWindow(window, 9 /* SW_RESTORE */); Native.SetForegroundWindow(window); return; }
+            }
+            Process.Start(new ProcessStartInfo("explorer.exe", $"shell:AppsFolder\\{id}") { UseShellExecute = true });
+        }
+        catch (Exception ex) { Debug.WriteLine($"Couldn't open {id}: {ex.Message}"); }
+    }
+
     void Post(Action a) => ui.TryEnqueue(() => a());
 
     void Attach()
