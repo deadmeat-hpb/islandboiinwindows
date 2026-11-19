@@ -19,12 +19,15 @@ static class Glass
 {
     static CanvasRenderTarget? _blurred;
 
+    /// <summary>Physical pixels per DIP of the canvas (the size scale passed to Draw can be larger on big screens).</summary>
+    public static float Dpi = 1;
+
     static Color White(int a) => Gray(a, 255);
     static Color Gray(int a, byte v) => ColorHelper.FromArgb((byte)Math.Clamp(a, 0, 255), v, v, v);
 
     public static void Draw(CanvasDrawingSession ds, ICanvasImage? background, float originX, float cx, float top, float w, float h, float s, float expand, Color glow, float glowStrength, float sag, Action<Rect>? content, Color wash = default, float washStrength = 0)
     {
-        ds.Transform = Matrix3x2.CreateTranslation(-originX, 0) * Matrix3x2.CreateScale(1f / s); // draw in screen pixels; originX = where the canvas sits
+        ds.Transform = Matrix3x2.CreateTranslation(-originX, 0) * Matrix3x2.CreateScale(1f / Dpi); // draw in screen pixels; originX = where the canvas sits
         var rect = new Rect(cx - w / 2, top, w, h);
         float r = MathF.Min(h / 2, 30 * s);
         float attach = Math.Clamp(1 - top / (4 * s), 0, 1); // resting at the screen edge: melt into it with curved shoulders
@@ -38,7 +41,7 @@ static class Glass
         if (background is not null) DrawRefraction(ds, background, shape, rect, r, s, expand);
         else ds.FillGeometry(shape, Gray(200, 22));
 
-        ds.FillGeometry(shape, Gray((int)(16 + 70 * expand), 12)); // light tint, darker when expanded for legible text
+        ds.FillGeometry(shape, Gray((int)(16 + 70 * expand + 70 * attach), 12)); // light tint, darker when expanded for legible text; the idle bar is smoked so it reads on any background
         if (glowStrength > 0) // light from the album art spilling into the glass
         {
             using var light = new CanvasRadialGradientBrush(ds, WithAlpha(glow, 0.10f * glowStrength), WithAlpha(glow, 0))
@@ -161,7 +164,7 @@ static class Glass
         };
         if (!inner) // melted into the top bar: no line along the screen edge or the shoulders; the rim fades in toward the bottom
         {
-            using var fade = new CanvasLinearGradientBrush(ds, White(0), White(150))
+            using var fade = new CanvasLinearGradientBrush(ds, White(0), White(200))
             {
                 StartPoint = new Vector2((float)rect.Left, (float)rect.Top + 2 * s),
                 EndPoint = new Vector2((float)rect.Left, (float)rect.Bottom),

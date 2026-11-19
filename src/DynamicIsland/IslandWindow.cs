@@ -52,7 +52,8 @@ public sealed class IslandWindow : Window
     FlowWindow? _flow;
     double _pulseAt = -10, _reachAt = -10, _rippleAt = -10, _artInAt = -10, _holdUntil; // minimize-flow arrival animation
     Native.WinEventProc? _minimizeProc; // field so the hook callback isn't garbage-collected
-    float _s = 1; // physical px per DIP; all island math is in physical px
+    float _s = 1; // island size scale in physical px (DPI, but at least screen width / 1920); all island math is in physical px
+    float _dpi = 1; // physical px per DIP, for converting to and from XAML coordinates
 
     Mode _mode = Mode.Idle;
     Spring _x, _w, _h, _top, _stack; // _stack: top edge of the media pill parked under a notification (0 = tucked away)
@@ -140,8 +141,7 @@ public sealed class IslandWindow : Window
             _flow = new FlowWindow();
             _flow.Nearing += () => { _reachAt = _clock.Elapsed.TotalSeconds; _dirty = true; SetFast(true); }; // the underside reaches for the drop
             _flow.Arrived += () =>
-            {
-                double now = _clock.Elapsed.TotalSeconds;
+            {                double now = _clock.Elapsed.TotalSeconds;
                 (_pulseAt, _rippleAt) = (now, now);
                 if (_mode is Mode.Idle or Mode.Hover && _media.HasSession && !_fullscreen) // swallow the drop and swell into the pill
                 {
@@ -156,7 +156,7 @@ public sealed class IslandWindow : Window
         }
         var a = _media.Accent;
         var color = Microsoft.UI.ColorHelper.FromArgb(255, (byte)((255 + a.R) / 2), (byte)((255 + a.G) / 2), (byte)((255 + a.B) / 2));
-        _flow.Play(new RectInt32(_monLeft, _monTop, _monW, _monH), _s, from, to, color);
+        _flow.Play(new RectInt32(_monLeft, _monTop, _monW, _monH), _dpi, from, to, color);
     }
 
     void SetupWindow()
@@ -196,7 +196,12 @@ public sealed class IslandWindow : Window
         (_monLeft, _monTop, _monW, _monH) = (mi.rcMonitor.Left, mi.rcMonitor.Top, mi.rcMonitor.Right - mi.rcMonitor.Left, mi.rcMonitor.Bottom - mi.rcMonitor.Top);
 
         AppWindow.Move(new PointInt32(_monLeft, _monTop)); // move first so we read this monitor's DPI
-        _s = Native.GetDpiForWindow(_hwnd) / 96f;
+        _dpi = Native.GetDpiForWindow(_hwnd) / 96f;
+        // Size the island for the screen, not just DPI: a 2560-wide monitor at 100% would otherwise get the smallest island
+        // (an 84 x 8 px bar). Laptops at their usual 125-200% scaling keep their size.
+        _s = MathF.Max(_dpi, _monW / 1920f);
+        Glass.Dpi = _dpi;
+        _canvas.Width = CanvasDip * _s / _dpi;
         _stripH = (int)(StripDip * _s);
         AppWindow.MoveAndResize(new RectInt32(_monLeft, _monTop, _monW, _stripH));
     }
@@ -291,7 +296,7 @@ public sealed class IslandWindow : Window
         float canvasW = CanvasDip * _s, half = w / 2 + 40 * _s;
         if (cx - half >= _canvasLeftPx && cx + half <= _canvasLeftPx + canvasW) return;
         _canvasLeftPx = Math.Clamp(MathF.Round(cx - canvasW / 2), 0, MathF.Max(0, _monW - canvasW));
-        _shift.X = _canvasLeftPx / _s;
+        _shift.X = _canvasLeftPx / _dpi;
     }
 
     void SetFast(bool on)
@@ -369,8 +374,8 @@ public sealed class IslandWindow : Window
         Native.SetWindowRgn(_hwnd, Native.CreateRectRgn(region.Item1, region.Item2, region.Item3, region.Item4), true);
     }
 
-    float PointerX(PointerRoutedEventArgs e) => (float)e.GetCurrentPoint(_root).Position.X * _s;
-    float PointerY(PointerRoutedEventArgs e) => (float)e.GetCurrentPoint(_root).Position.Y * _s;
+    float PointerX(PointerRoutedEventArgs e) => (float)e.GetCurrentPoint(_root).Position.X * _dpi;
+    float PointerY(PointerRoutedEventArgs e) => (float)e.GetCurrentPoint(_root).Position.Y * _dpi;
 
     Windows.Foundation.Rect IslandRect() { var (cx, top, w, h) = Shape(); return new(cx - w / 2, top, w, h); }
 
