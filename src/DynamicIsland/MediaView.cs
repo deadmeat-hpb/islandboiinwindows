@@ -31,6 +31,26 @@ static class MediaView
         }
     }
 
+    /// <summary>Clock pill/card: big bold time on the left, the date small and grey on the right.</summary>
+    public static void DrawClock(CanvasDrawingSession ds, Rect r, float s, float a, float timeSize)
+    {
+        var now = DateTime.Now;
+        float pad = MathF.Max(14, timeSize * 0.6f) * s;
+        using var time = new CanvasTextFormat
+        {
+            FontFamily = Fonts.Inter(FontWeights.SemiBold), FontSize = timeSize * s, FontWeight = FontWeights.SemiBold,
+            VerticalAlignment = CanvasVerticalAlignment.Center, WordWrapping = CanvasWordWrapping.NoWrap,
+        };
+        using var date = new CanvasTextFormat
+        {
+            FontFamily = Fonts.Inter(FontWeights.Medium), FontSize = MathF.Max(12, timeSize * 0.4f) * s, FontWeight = FontWeights.Medium,
+            HorizontalAlignment = CanvasHorizontalAlignment.Right, VerticalAlignment = CanvasVerticalAlignment.Center, WordWrapping = CanvasWordWrapping.NoWrap,
+        };
+        var box = new Rect(r.X + pad, r.Y, Math.Max(0, r.Width - 2 * pad), r.Height);
+        Fonts.DrawTabular(ds, now.ToString("HH:mm"), box, White(a), time);
+        ds.DrawText(now.ToString("ddd M/d", System.Globalization.CultureInfo.CurrentCulture), box, White(0.55f * a), date);
+    }
+
     /// <summary>Expanded card: art, title, artist, progress bar and transport buttons.</summary>
     public static void DrawExpanded(CanvasDrawingSession ds, Rect r, float s, MediaSource m, double time, float a)
     {
@@ -48,9 +68,7 @@ static class MediaView
 
         if (!m.HasSession)
         {
-            var now = DateTime.Now; // nothing playing: the card is a clock
-            Fonts.DrawTabular(ds, now.ToString("HH:mm"), new Rect(x + 24 * s, y + 24 * s, w - 48 * s, 26 * s), White(a), title);
-            ds.DrawText(now.ToString("D", System.Globalization.CultureInfo.CurrentCulture), new Rect(x + 24 * s, y + 52 * s, w - 48 * s, 22 * s), White(0.65f * a), sub);
+            DrawClock(ds, r, s, a, 40); // nothing playing: the card is a clock
             return;
         }
 

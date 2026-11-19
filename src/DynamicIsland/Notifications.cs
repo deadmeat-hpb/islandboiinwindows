@@ -10,7 +10,7 @@ using Windows.UI.Notifications.Management;
 
 namespace DynamicIsland;
 
-sealed record IslandNotification(string App, string Title, string Body, CanvasBitmap? Icon, string AppId);
+sealed record IslandNotification(string App, string Title, string Body, CanvasBitmap? Icon, string AppId, Windows.UI.Color? Accent = null);
 
 /// <summary>Picks up new Windows toast notifications. Windows asks the user for access once.</summary>
 sealed class NotificationSource(CanvasDevice device)
@@ -67,8 +67,13 @@ sealed class NotificationSource(CanvasDevice device)
             icon = await CanvasBitmap.LoadAsync(device, stream);
         }
         catch { } // plenty of apps have no readable logo; the card shows a placeholder
-        return new(n.AppInfo?.DisplayInfo?.DisplayName ?? "", texts.FirstOrDefault() ?? "", string.Join("  ", texts.Skip(1)), icon, n.AppInfo?.AppUserModelId ?? "");
+        string appId = n.AppInfo?.AppUserModelId ?? "";
+        Windows.UI.Color? accent = null;
+        if (icon is not null && !_accents.TryGetValue(appId, out var cached)) _accents[appId] = cached = MediaSource.AccentOf(device, icon); // the app's colour, once per app
+        if (icon is not null) accent = _accents[appId];
+        return new(n.AppInfo?.DisplayInfo?.DisplayName ?? "", texts.FirstOrDefault() ?? "", string.Join("  ", texts.Skip(1)), icon, appId, accent);
     }
+    readonly Dictionary<string, Windows.UI.Color> _accents = [];
 
     public static void Open(IslandNotification n)
     {

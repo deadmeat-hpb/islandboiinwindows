@@ -22,7 +22,7 @@ static class Glass
     static Color White(int a) => Gray(a, 255);
     static Color Gray(int a, byte v) => ColorHelper.FromArgb((byte)Math.Clamp(a, 0, 255), v, v, v);
 
-    public static void Draw(CanvasDrawingSession ds, ICanvasImage? background, float originX, float cx, float top, float w, float h, float s, float expand, Color glow, float glowStrength, float sag, Action<Rect>? content)
+    public static void Draw(CanvasDrawingSession ds, ICanvasImage? background, float originX, float cx, float top, float w, float h, float s, float expand, Color glow, float glowStrength, float sag, Action<Rect>? content, Color wash = default, float washStrength = 0)
     {
         ds.Transform = Matrix3x2.CreateTranslation(-originX, 0) * Matrix3x2.CreateScale(1f / s); // draw in screen pixels; originX = where the canvas sits
         var rect = new Rect(cx - w / 2, top, w, h);
@@ -48,9 +48,31 @@ static class Glass
             };
             ds.FillGeometry(shape, light);
         }
+        if (washStrength > 0) DrawWash(ds, shape, rect, wash, washStrength);
         if (content is not null)
             using (ds.CreateLayer(1f, shape)) content(rect);
         DrawRim(ds, shape, rect, r, s, inner: attach == 0);
+    }
+
+    /// <summary>
+    /// Soft light rising from the lower middle inside the glass, in the source's colour (album, app, notice).
+    /// A plain radial gradient clipped to the shape: no blur, no halo outside the pill.
+    /// </summary>
+    static void DrawWash(CanvasDrawingSession ds, CanvasGeometry shape, Rect rect, Color c, float strength)
+    {
+        static byte Mute(byte v) => (byte)(v * 0.75f + 128 * 0.25f); // a little desaturated: a tint, not neon
+        var tint = ColorHelper.FromArgb(255, Mute(c.R), Mute(c.G), Mute(c.B));
+        using var brush = new CanvasRadialGradientBrush(ds,
+        [
+            new CanvasGradientStop { Position = 0f, Color = WithAlpha(tint, 0.30f * strength) },
+            new CanvasGradientStop { Position = 0.55f, Color = WithAlpha(tint, 0.10f * strength) },
+            new CanvasGradientStop { Position = 1f, Color = WithAlpha(tint, 0) },
+        ])
+        {
+            Center = new Vector2((float)(rect.X + rect.Width / 2), (float)rect.Bottom),
+            RadiusX = (float)rect.Width * 0.6f, RadiusY = (float)rect.Height * 1.1f,
+        };
+        ds.FillGeometry(shape, brush);
     }
 
     static Color WithAlpha(Color c, float a) => ColorHelper.FromArgb((byte)Math.Clamp(a * 255, 0, 255), c.R, c.G, c.B);

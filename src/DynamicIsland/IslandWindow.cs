@@ -339,7 +339,7 @@ public sealed class IslandWindow : Window
     }
 
     /// <summary>What the island shows when not expanded: the pill after a click until the mouse leaves, else the slim bar (swollen on hover).</summary>
-    Mode RestMode(bool near) => _pinned && _media.HasSession ? Mode.Compact : near ? Mode.Hover : Mode.Idle; // the pill only shows after a click; otherwise the slim bar, even while music plays
+    Mode RestMode(bool near) => _pinned ? Mode.Compact : near ? Mode.Hover : Mode.Idle; // the pill only shows after a click; otherwise the slim bar, even while music plays
 
     /// <summary>Right click steps back one stage: card → pill → bar. Notices and pop-ups just close.</summary>
     void OnRightClick()
@@ -469,8 +469,8 @@ public sealed class IslandWindow : Window
         // Click ladder: bar → pill → card → open the playing app.
         switch (_mode)
         {
-            case Mode.Idle or Mode.Hover when _media.HasSession:
-                _pinned = true; // show the pill even if paused, until the mouse leaves
+            case Mode.Idle or Mode.Hover:
+                _pinned = true; // show the pill (media, or the clock when nothing plays) until the mouse leaves
                 SetMode(Mode.Compact);
                 break;
             case Mode.Expanded:
@@ -509,8 +509,8 @@ public sealed class IslandWindow : Window
         if (_stack.Value > 2 * _s) // stacked media pill, drawn first so the notification covers it as it tucks back up
         {
             float pillAlpha = Math.Clamp(_stack.Value / (24 * _s), 0, 1);
-            Glass.Draw(ds, _capture?.Image, _canvasLeftPx, cx, _stack.Value, PillW, PillH, _s, 0, _media.Accent, _media.Playing ? 1 : 0, 0,
-                rect => MediaView.DrawCompact(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, pillAlpha));
+            Glass.Draw(ds, _capture?.Image, _canvasLeftPx, cx, _stack.Value, PillW, PillH, _s, 0, _media.Accent, 0, 0,
+                rect => MediaView.DrawCompact(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, pillAlpha), _media.Accent, pillAlpha);
         }
         float expand = Math.Clamp((_h.Value - 14 * _s) / (118 * _s), 0, 1);
         float compactAlpha = _mode == Mode.Compact ? Math.Clamp((_w.Value - 160 * _s) / (50 * _s), 0, 1) : 0;
@@ -524,8 +524,17 @@ public sealed class IslandWindow : Window
         float t = _media.TransitionT;
         var a = _media.PrevAccent; var b = _media.Accent;
         var glow = Microsoft.UI.ColorHelper.FromArgb(255, (byte)(a.R + (b.R - a.R) * t), (byte)(a.G + (b.G - a.G) * t), (byte)(a.B + (b.B - a.B) * t));
-        float glowStrength = _media.Playing && _mode is Mode.Compact or Mode.Expanded ? 1 : 0; // steady and faint: a pulse read as gimmicky
+        float glowStrength = 0; // the outer halo is only the brief flow landing; the steady colour lives inside the glass (wash)
         double clock = _clock.Elapsed.TotalSeconds;
+        // Illumination: soft light rising inside every pill and notice, in its source's colour.
+        var cool = Microsoft.UI.ColorHelper.FromArgb(255, 150, 180, 255);
+        var wash = _mode switch
+        {
+            Mode.Notify => _note?.Accent ?? cool,
+            Mode.Hud => _hud?.Tint ?? cool,
+            _ => _media.HasSession ? glow : cool, // album colour, blended during the song slide
+        };
+        float washStrength = _mode is Mode.Idle or Mode.Hover ? 0 : Math.Clamp((_h.Value - 16 * _s) / (14 * _s), 0, 1); // grows in with the pill
         glowStrength = MathF.Max(glowStrength, 0.6f * MathF.Max(0, 1 - (float)(clock - _pulseAt) / 0.7f)); // faint light as the flow lands
         // Melting: the bottom drips down while the card grows. Not for the pill: there the drop read as a second pill popping out underneath.
         float sag = _mode is Mode.Expanded or Mode.Notify ? Math.Clamp(_h.Velocity * 0.012f, 0, 20 * _s) : 0;
@@ -535,7 +544,11 @@ public sealed class IslandWindow : Window
         MediaView.ArtIn = (float)Math.Clamp((clock - _artInAt - 0.15) / 0.35, 0, 1); // the art arrives last
         Glass.Draw(ds, _capture?.Image, _canvasLeftPx, cx, top, w, h, _s, expand, glow, glowStrength, sag, rect =>
         {
-            if (compactAlpha > 0) MediaView.DrawCompact(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, compactAlpha);
+            if (compactAlpha > 0)
+            {
+                if (_media.HasSession) MediaView.DrawCompact(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, compactAlpha);
+                else MediaView.DrawClock(ds, rect, _s, compactAlpha, 20);
+            }
             if (expandedAlpha > 0) MediaView.DrawExpanded(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, expandedAlpha);
             if (note is not null && cardAlpha > 0) NotificationView.Draw(ds, rect, _s, note, cardAlpha);
             if (hudEvent is not null && hudAlpha > 0) HudView.Draw(ds, rect, _s, hudEvent, hudAlpha);
@@ -546,7 +559,7 @@ public sealed class IslandWindow : Window
                 ds.DrawEllipse((float)(rect.X + rect.Width / 2), (float)rect.Bottom, rx, rx * 0.4f,
                     Microsoft.UI.ColorHelper.FromArgb((byte)(60 * (1 - ripple)), 255, 255, 255), 1.5f * _s);
             }
-        });
+        }, wash, washStrength);
     }
 
     void DrawClock(CanvasDrawingSession ds, Windows.Foundation.Rect rect, float alpha)

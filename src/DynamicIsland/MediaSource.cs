@@ -268,7 +268,10 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
     }
 
     /// <summary>The most vivid colour in the art (scaled to 8×8), brightened, so the glow reads on dark and light screens.</summary>
-    Windows.UI.Color AccentOf(CanvasBitmap art)
+    Windows.UI.Color AccentOf(CanvasBitmap art) => AccentOf(device, art);
+
+    /// <summary>The image's most vibrant colour, softened toward grey (album glow, notification app tint).</summary>
+    internal static Windows.UI.Color AccentOf(CanvasDevice device, CanvasBitmap art)
     {
         using var small = new CanvasRenderTarget(device, 8, 8, 96);
         using (var ds = small.CreateDrawingSession()) ds.DrawImage(art, new Windows.Foundation.Rect(0, 0, 8, 8), art.Bounds);
