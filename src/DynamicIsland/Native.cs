@@ -25,6 +25,8 @@ static class Native
     [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
     [DllImport("user32.dll")] public static extern bool ShowWindow(nint hwnd, int cmd);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(nint hwnd);
+    [DllImport("user32.dll")] public static extern bool IsIconic(nint hwnd);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern int GetApplicationUserModelId(nint process, ref uint length, System.Text.StringBuilder? id);
     [DllImport("user32.dll")] public static extern nint MonitorFromPoint(POINT pt, uint flags);
     [DllImport("user32.dll", EntryPoint = "GetMonitorInfoW")] public static extern bool GetMonitorInfo(nint hmon, ref MONITORINFO mi);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(nint hwnd);

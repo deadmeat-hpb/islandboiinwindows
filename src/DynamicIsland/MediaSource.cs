@@ -87,10 +87,14 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
         if (string.IsNullOrEmpty(id)) return;
         try
         {
-            if (id.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) // plain desktop apps report their exe name
+            // Bring a running instance forward ourselves: launching a running packaged app via explorer doesn't pass the foreground lock.
+            var window = Process.GetProcesses().Where(p => p.MainWindowHandle != 0 && (AppIdOf(p) == id || id.Equals(p.ProcessName + ".exe", StringComparison.OrdinalIgnoreCase)))
+                .Select(p => p.MainWindowHandle).FirstOrDefault();
+            if (window != 0)
             {
-                var window = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(id)).Select(p => p.MainWindowHandle).FirstOrDefault(h => h != 0);
-                if (window != 0) { Native.ShowWindow(window, 9 /* SW_RESTORE */); Native.SetForegroundWindow(window); return; }
+                if (Native.IsIconic(window)) Native.ShowWindow(window, 9 /* SW_RESTORE */); // restoring a non-minimized window would un-maximize it
+                Native.SetForegroundWindow(window);
+                return;
             }
             Process.Start(new ProcessStartInfo("explorer.exe", $"shell:AppsFolder\\{id}") { UseShellExecute = true });
         }
@@ -169,6 +173,18 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
         Accent = art is null ? Microsoft.UI.Colors.White : AccentOf(art);
         Changed?.Invoke();
         if (newSong) await LoadLyrics(session, title, artist);
+    }
+
+    /// <summary>A packaged app's AppUserModelId ("Family!App"), or null for plain desktop processes and ones we can't open.</summary>
+    static string? AppIdOf(Process p)
+    {
+        try
+        {
+            uint len = 256;
+            var sb = new System.Text.StringBuilder((int)len);
+            return Native.GetApplicationUserModelId(p.Handle, ref len, sb) == 0 ? sb.ToString() : null;
+        }
+        catch { return null; } // access denied (elevated or system processes)
     }
 
     /// <summary>The most vivid colour in the art (scaled to 8×8), brightened, so the glow reads on dark and light screens.</summary>

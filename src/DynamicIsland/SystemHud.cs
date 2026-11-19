@@ -30,7 +30,6 @@ sealed class SystemHud(DispatcherQueue ui)
     ManagementEventWatcher? _brightness;
     DeviceWatcher? _bluetooth;
     readonly Dictionary<string, bool> _btConnected = [];
-    bool _btReady;
     int _lowAnnounced = 101;
     string? _ssid;
 
@@ -92,7 +91,6 @@ sealed class SystemHud(DispatcherQueue ui)
             _bluetooth = DeviceInformation.CreateWatcher(aqs, ["System.Devices.Aep.IsConnected", "System.Devices.Aep.ContainerId"], DeviceInformationKind.AssociationEndpoint);
             _bluetooth.Added += (_, d) => ui.TryEnqueue(() => OnBluetooth(d.Id, d.Name, d.Properties));
             _bluetooth.Updated += (_, u) => ui.TryEnqueue(() => OnBluetooth(u.Id, null, u.Properties));
-            _bluetooth.EnumerationCompleted += (_, _) => ui.TryEnqueue(() => _btReady = true); // don't announce devices already connected at launch
             _bluetooth.Start();
         }
         catch (Exception ex) { Debug.WriteLine($"Bluetooth watcher unavailable: {ex}"); }
@@ -106,7 +104,9 @@ sealed class SystemHud(DispatcherQueue ui)
         if (!props.TryGetValue("System.Devices.Aep.IsConnected", out var v) || v is not bool connected) return;
         bool was = _btConnected.GetValueOrDefault(id);
         _btConnected[id] = connected;
-        if (!_btReady || !connected || was || !_btInfo.TryGetValue(id, out var info)) return;
+        // Added only records the starting state; a later false→true update is a real connect. (Waiting for EnumerationCompleted
+        // instead ignored connects for ~30 s after launch: that is how long the Bluetooth endpoint scan takes.)
+        if (name is not null || !connected || was || !_btInfo.TryGetValue(id, out var info)) return;
 
         int? battery = await BatteryOf(info.Container);
         Raise(new("\uE702", battery is int b ? b / 100f : -1, battery is int p ? $"{p}%" : "", info.Name, Seconds: 5));
