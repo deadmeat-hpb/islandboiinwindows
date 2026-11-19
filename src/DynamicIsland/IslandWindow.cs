@@ -20,7 +20,7 @@ namespace DynamicIsland;
 /// </summary>
 public sealed class IslandWindow : Window
 {
-    enum Mode { Idle, Hover, Compact, Notify, Expanded }
+    enum Mode { Idle, Hover, Compact, Hud, Notify, Expanded }
 
     const float StripDip = 220;
     static readonly string PosFile = Path.Combine(
@@ -33,7 +33,8 @@ public sealed class IslandWindow : Window
     readonly MediaSource _media;
     readonly NotificationSource _notes = new(CanvasDevice.GetSharedDevice());
     IslandNotification? _note;
-    double _noteUntil;
+    double _noteUntil, _hudUntil;
+    HudEvent? _hud;
     ScreenCapture? _capture;
 
     nint _monitor;
@@ -74,6 +75,15 @@ public sealed class IslandWindow : Window
         };
         _media.Start();
         _notes.Start(DispatcherQueue);
+        var hud = new SystemHud(DispatcherQueue);
+        hud.Changed += e =>
+        {
+            if (_mode is Mode.Expanded or Mode.Notify) return; // don't cover an open card or a notification
+            (_hud, _hudUntil) = (e, _clock.Elapsed.TotalSeconds + 1.6);
+            if (_mode != Mode.Hud) SetMode(Mode.Hud);
+            _dirty = true;
+        };
+        hud.Start();
 
         _x = new Spring(LoadPosition() * _monW, 520, 34); // stiff-ish follow: lags a little behind the cursor while dragging
         _w = new Spring(0, 300, 20);                       // bouncy shape springs
@@ -130,6 +140,7 @@ public sealed class IslandWindow : Window
             Mode.Hover => (124 * _s, 14 * _s, 6 * _s),
             Mode.Compact => (210 * _s, 30 * _s, 6 * _s),
             Mode.Notify => (360 * _s, 72 * _s, 8 * _s),
+            Mode.Hud => (240 * _s, 32 * _s, 6 * _s),
             _ when _media.HasSession => (400 * _s, 170 * _s, 10 * _s),
             _ => (340 * _s, 96 * _s, 10 * _s),
         };
@@ -197,6 +208,7 @@ public sealed class IslandWindow : Window
             else if (now > _noteUntil) ShowNextNote(now, near);
         }
         else if (_notes.Pending.Count > 0) ShowNextNote(now, near);
+        else if (_mode == Mode.Hud) { if (now > _hudUntil) SetMode(RestMode(near)); }
         else if (_mode != RestMode(near)) SetMode(RestMode(near));
     }
 
@@ -326,11 +338,14 @@ public sealed class IslandWindow : Window
         float cardAlpha = Math.Clamp((_h.Value / _h.Target - 0.75f) / 0.25f, 0, 1);
         float expandedAlpha = _mode == Mode.Expanded ? cardAlpha : 0;
         var note = _mode == Mode.Notify ? _note : null;
+        var hudEvent = _mode == Mode.Hud ? _hud : null;
+        float hudAlpha = Math.Clamp((_w.Value - 180 * _s) / (60 * _s), 0, 1);
         Glass.Draw(ds, _capture?.Image, cx, top, w, h, _s, expand, rect =>
         {
             if (compactAlpha > 0) MediaView.DrawCompact(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, compactAlpha);
             if (expandedAlpha > 0) MediaView.DrawExpanded(ds, rect, _s, _media, expandedAlpha);
             if (note is not null && cardAlpha > 0) NotificationView.Draw(ds, rect, _s, note, cardAlpha);
+            if (hudEvent is not null && hudAlpha > 0) HudView.Draw(ds, rect, _s, hudEvent, hudAlpha);
         });
     }
 
