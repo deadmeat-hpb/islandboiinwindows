@@ -227,7 +227,7 @@ public sealed class IslandWindow : Window
             Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
         UpdateHover(now);
         // Stacking: while a notification or notice is up, the playing media drops below it as its own pill, then pushes back up.
-        _stack.Target = _media.Playing && _mode is Mode.Notify or Mode.Hud ? _h.Target + 8 * _s : 0;
+        _stack.Target = _media.Playing && _mode is Mode.Notify or Mode.Hud ? _top.Target + _h.Target + 8 * _s : 0;
         bool animating = !_stack.Settled || _pressed || now - _pulseAt < 0.7 || _media.TransitionT < 1 || _media.ArtFadeT < 1 || !(_x.Settled && _w.Settled && _h.Settled && _top.Settled);
         SetFast(animating);
 
