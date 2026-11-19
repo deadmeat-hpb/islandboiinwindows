@@ -51,7 +51,7 @@ public sealed class IslandWindow : Window
     int _monLeft, _monTop, _monW, _monH, _stripH;
     FlowWindow? _flow;
     bool _wasPlaying;
-    double _pulseAt = -10;
+    double _pulseAt = -10, _stoppedAt = -10;
     float _s = 1; // physical px per DIP; all island math is in physical px
 
     Mode _mode = Mode.Idle;
@@ -84,7 +84,10 @@ public sealed class IslandWindow : Window
         _media.Changed += () =>
         {
             if (_mode == Mode.Expanded) SetMode(Mode.Expanded); // card size depends on whether anything is playing
-            if (_media.Playing && !_wasPlaying && _clock.Elapsed.TotalSeconds > 3 && !_hiddenForFullscreen) FlowIn(); // not for music already playing at launch
+            double now = _clock.Elapsed.TotalSeconds;
+            // Only a real start: not music already playing at launch, and not the brief pause apps make when skipping songs.
+            if (_media.Playing && !_wasPlaying && now > 3 && now - _stoppedAt > 3 && !_hiddenForFullscreen) FlowIn();
+            if (!_media.Playing && _wasPlaying) _stoppedAt = now;
             _wasPlaying = _media.Playing;
             _dirty = true;
         };
