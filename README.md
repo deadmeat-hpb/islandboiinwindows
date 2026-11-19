@@ -11,6 +11,7 @@ A Dynamic Island for Windows, with an Apple Liquid Glass look.
 - Music: while anything plays (Spotify, a browser, Media Player...), the island becomes a compact pill with the album art and a moving waveform. Click it for the full card: art, title, artist, progress, and previous / play-pause / next. The card also shows the current lyric line above the progress bar when [LRCLIB](https://lrclib.net) has synced lyrics for the song (it receives the title and artist).
 - Notifications: new Windows notifications drop down from the island for 5 seconds (hover to keep one open, click to open the app). Windows asks once for notification access. To stop Windows' own pop-ups doubling up, turn off "Show notification banners" in Settings > System > Notifications.
 - Volume, brightness (laptop screens) and plugging in the charger show a slim pop-up with an icon and level bar.
+- Tailored notices: battery low (20/10/5%), Bluetooth device connected (with its battery when the device reports it), Wi-Fi connected, and charging, as a slim pill with an icon, text and a level ring.
 - Right-click: quit.
 
 ## Run

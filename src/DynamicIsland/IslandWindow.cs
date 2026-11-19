@@ -86,8 +86,8 @@ public sealed class IslandWindow : Window
         hud.Changed += e =>
         {
             if (_mode is Mode.Expanded or Mode.Notify) return; // don't cover an open card or a notification
-            (_hud, _hudUntil) = (e, _clock.Elapsed.TotalSeconds + 1.6);
-            if (_mode != Mode.Hud) SetMode(Mode.Hud);
+            (_hud, _hudUntil) = (e, _clock.Elapsed.TotalSeconds + e.Seconds);
+            SetMode(Mode.Hud); // re-run: a notice is wider than a level bar
             _dirty = true;
         };
         hud.Start();
@@ -151,7 +151,7 @@ public sealed class IslandWindow : Window
             Mode.Hover => (124 * _s, 14 * _s, 6 * _s),
             Mode.Compact => (210 * _s, 30 * _s, 6 * _s),
             Mode.Notify => (360 * _s, 72 * _s, 8 * _s),
-            Mode.Hud => (240 * _s, 32 * _s, 6 * _s),
+            Mode.Hud => ((_hud?.Text.Length > 0 ? 300 : 240) * _s, 32 * _s, 6 * _s), // notices are wider than level bars
             _ when _media.HasSession => (400 * _s, 170 * _s, 10 * _s),
             _ => (340 * _s, 96 * _s, 10 * _s),
         };
