@@ -18,7 +18,7 @@ namespace DynamicIsland;
 /// One island pop-up. With <paramref name="Text"/> it's a ColorOS-style notice: icon, text, and a level ring + value on the right.
 /// Without it, a volume/brightness-style level bar. Level &lt; 0 hides the bar/ring.
 /// </summary>
-sealed record HudEvent(string Glyph, float Level, string Value, string Text = "", Windows.UI.Color? Tint = null, double Seconds = 1.6);
+sealed record HudEvent(string Glyph, float Level, string Value, string Text = "", Windows.UI.Color? Tint = null, double Seconds = 1.6, string? Settings = null);
 
 /// <summary>Volume, brightness, power, Bluetooth and Wi-Fi events, re-posted to the UI thread.</summary>
 sealed class SystemHud(DispatcherQueue ui)
@@ -62,7 +62,7 @@ sealed class SystemHud(DispatcherQueue ui)
             if (PowerManager.PowerSupplyStatus != PowerSupplyStatus.Adequate) return; // only announce plugging in
             int pct = PowerManager.RemainingChargePercent;
             _lowAnnounced = 101;
-            Raise(new("\uE945", pct / 100f, $"{pct}%", "Charging", Green, 2.5));
+            Raise(new("\uE945", pct / 100f, $"{pct}%", "Charging", Green, 2.5, "ms-settings:batterysaver"));
         };
         PowerManager.RemainingChargePercentChanged += (_, _) =>
         {
@@ -72,7 +72,7 @@ sealed class SystemHud(DispatcherQueue ui)
                 if (pct <= level && _lowAnnounced > level)
                 {
                     _lowAnnounced = level;
-                    Raise(new("\uEBA0", pct / 100f, $"{pct}%", "Battery low", Red, 7));
+                    Raise(new("\uEBA0", pct / 100f, $"{pct}%", "Battery low", Red, 7, "ms-settings:batterysaver"));
                     break;
                 }
         };
@@ -109,7 +109,7 @@ sealed class SystemHud(DispatcherQueue ui)
         if (name is not null || !connected || was || !_btInfo.TryGetValue(id, out var info)) return;
 
         int? battery = await BatteryOf(info.Container);
-        Raise(new("\uE702", battery is int b ? b / 100f : -1, battery is int p ? $"{p}%" : "", info.Name, Seconds: 5));
+        Raise(new("\uE702", battery is int b ? b / 100f : -1, battery is int p ? $"{p}%" : "", info.Name, Seconds: 5, Settings: "ms-settings:bluetooth"));
     }
 
     /// <summary>Battery % from the device node that shares the endpoint's container, if the device reports one.</summary>
@@ -134,7 +134,7 @@ sealed class SystemHud(DispatcherQueue ui)
         if (ssid == _ssid) return;
         bool announce = _ssid is not null && !string.IsNullOrEmpty(ssid); // skip the very first check and disconnects
         _ssid = ssid ?? "";
-        if (announce) Raise(new("\uE701", (profile!.GetSignalBars() ?? 0) / 5f, "", ssid!, Seconds: 2.5));
+        if (announce) Raise(new("\uE701", (profile!.GetSignalBars() ?? 0) / 5f, "", ssid!, Seconds: 2.5, Settings: "ms-settings:network-wifi"));
     }
 }
 

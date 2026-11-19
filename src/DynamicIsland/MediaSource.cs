@@ -27,9 +27,12 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
     public string PrevTitle { get; private set; } = "";
     public string PrevArtist { get; private set; } = "";
     public CanvasBitmap? PrevArt { get; private set; }
-    double _changedAt = double.NegativeInfinity;
+    double _changedAt = double.NegativeInfinity, _artAt = double.NegativeInfinity;
+    static double Now => Environment.TickCount64 / 1000.0;
+    /// <summary>0 → 1 while late-arriving art for the same song fades in.</summary>
+    public float ArtFadeT => (float)Math.Clamp((Now - _artAt) / 0.25, 0, 1);
     /// <summary>0 → 1 over the song-change slide; 1 when no change is in progress.</summary>
-    public float TransitionT => (float)Math.Clamp((Environment.TickCount64 / 1000.0 - _changedAt) / 0.4, 0, 1);
+    public float TransitionT => (float)Math.Clamp((Now - _changedAt) / 0.4, 0, 1);
 
     /// <summary>Glow colour picked from the album art; previous song's for blending during the slide.</summary>
     public Windows.UI.Color Accent { get; private set; } = Microsoft.UI.Colors.White;
@@ -151,28 +154,46 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
             {
                 var p = await session.TryGetMediaPropertiesAsync();
                 (title, artist) = (p.Title, p.Artist);
-                if (p.Thumbnail is not null)
-                {
-                    using var stream = await p.Thumbnail.OpenReadAsync();
-                    art = await CanvasBitmap.LoadAsync(device, stream);
-                }
+                if (p.Thumbnail is not null) art = await LoadArt(p.Thumbnail);
             }
         }
         catch (Exception ex) { Debug.WriteLine($"Couldn't read media properties: {ex}"); } // some apps publish no art or odd formats
         if (session != _session) { art?.Dispose(); return; } // a newer session took over while we awaited
 
         bool newSong = title != Title || artist != Artist;
+        if (!newSong && Art is null && art is not null) _artAt = Now; // art arrived after the title: fade it in instead of popping
         if (newSong && Title.Length > 0)
         {
             PrevArt?.Dispose();
             (PrevTitle, PrevArtist, PrevArt, PrevAccent) = (Title, Artist, Art, Accent);
-            _changedAt = Environment.TickCount64 / 1000.0;
+            _changedAt = Now;
         }
         else Art?.Dispose();
         (Title, Artist, Art) = (title, artist, art);
         Accent = art is null ? Microsoft.UI.Colors.White : AccentOf(art);
         Changed?.Invoke();
         if (newSong) await LoadLyrics(session, title, artist);
+    }
+
+    /// <summary>
+    /// Decodes cover art on the CPU (Windows Imaging, off the UI thread), scaled to at most 256 px, then uploads it.
+    /// TIDAL sends a second, large cover per track; decoding that through the shared Win2D device stalled the slide for up to 1.3 s.
+    /// </summary>
+    async Task<CanvasBitmap> LoadArt(Windows.Storage.Streams.IRandomAccessStreamReference thumbnail)
+    {
+        using var stream = await thumbnail.OpenReadAsync();
+        var decoder = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(stream);
+        double scale = Math.Min(1, 256.0 / Math.Max(decoder.PixelWidth, decoder.PixelHeight));
+        var transform = new Windows.Graphics.Imaging.BitmapTransform
+        {
+            ScaledWidth = (uint)Math.Max(1, decoder.PixelWidth * scale),
+            ScaledHeight = (uint)Math.Max(1, decoder.PixelHeight * scale),
+            InterpolationMode = Windows.Graphics.Imaging.BitmapInterpolationMode.Fant,
+        };
+        using var pixels = await decoder.GetSoftwareBitmapAsync(
+            Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8, Windows.Graphics.Imaging.BitmapAlphaMode.Premultiplied, transform,
+            Windows.Graphics.Imaging.ExifOrientationMode.RespectExifOrientation, Windows.Graphics.Imaging.ColorManagementMode.DoNotColorManage);
+        return CanvasBitmap.CreateFromSoftwareBitmap(device, pixels);
     }
 
     /// <summary>A packaged app's AppUserModelId ("Family!App"), or null for plain desktop processes and ones we can't open.</summary>

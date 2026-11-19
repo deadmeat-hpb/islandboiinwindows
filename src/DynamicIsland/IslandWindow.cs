@@ -184,7 +184,7 @@ public sealed class IslandWindow : Window
         if ((Native.GetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE) & Native.WS_EX_TOPMOST) == 0) // the shell can drop us out of the topmost band; then clicks hit the window below
             Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
         UpdateHover(now);
-        bool animating = _pressed || _media.TransitionT < 1 || !(_x.Settled && _w.Settled && _h.Settled && _top.Settled);
+        bool animating = _pressed || _media.TransitionT < 1 || _media.ArtFadeT < 1 || !(_x.Settled && _w.Settled && _h.Settled && _top.Settled);
         SetFast(animating);
 
         // Background refraction only refreshes at the slow tick rate when idle, and freezes in battery saver.
@@ -355,6 +355,14 @@ public sealed class IslandWindow : Window
                 case 1: _media.TogglePlay(); return;
                 case 2: _media.Next(); return;
             }
+        }
+
+        if (_mode == Mode.Hud && _hud?.Settings is { } page) // battery / Bluetooth / Wi-Fi notices open their Settings page
+        {
+            try { Process.Start(new ProcessStartInfo(page) { UseShellExecute = true }); }
+            catch (Exception ex) { Debug.WriteLine($"Couldn't open {page}: {ex.Message}"); }
+            _hudUntil = 0;
+            return;
         }
 
         // Click ladder: bar → pill → card → open the playing app.

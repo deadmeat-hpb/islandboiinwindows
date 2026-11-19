@@ -21,7 +21,7 @@ static class MediaView
     public static void DrawCompact(CanvasDrawingSession ds, Rect r, float s, MediaSource m, double time, float a)
     {
         float size = (float)r.Height - 10 * s;
-        Slide(m, 10 * s, a, (dx, al, art, _, _) => DrawArt(ds, art, new Rect(r.X + 7 * s + dx, r.Y + 5 * s, size, size), 5 * s, al));
+        Slide(m, 10 * s, a, (dx, al, art, _, _) => DrawArt(ds, art, new Rect(r.X + 7 * s + dx, r.Y + 5 * s, size, size), 5 * s, art == m.Art ? al * m.ArtFadeT : al));
 
         float cy = (float)(r.Y + r.Height / 2), x0 = (float)r.Right - 14 * s - 4 * 6 * s;
         for (int i = 0; i < 4; i++)
@@ -58,7 +58,7 @@ static class MediaView
         float textW = w - 118 * s, tw = lyric.Length > 0 ? textW * 0.5f : textW;
         Slide(m, 28 * s, a, (dx, al, art, t, ar) =>
         {
-            DrawArt(ds, art, new Rect(x + 20 * s + dx, y + 20 * s, 64 * s, 64 * s), 12 * s, al);
+            DrawArt(ds, art, new Rect(x + 20 * s + dx, y + 20 * s, 64 * s, 64 * s), 12 * s, art == m.Art ? al * m.ArtFadeT : al);
             ds.DrawText(t, new Rect(x + 98 * s + dx, y + 28 * s, tw, 24 * s), White(al), title);
             ds.DrawText(ar, new Rect(x + 98 * s + dx, y + 54 * s, tw, 20 * s), White(0.65f * al), sub);
         });
