@@ -13,6 +13,8 @@ A Dynamic Island for Windows, with an Apple Liquid Glass look.
 - Volume, brightness (laptop screens) and plugging in the charger show a slim pop-up with an icon and level bar.
 - Tailored notices: battery low (20/10/5%), Bluetooth device connected (with its battery when the device reports it), Wi-Fi connected, and charging, as a slim pill with an icon, text and a level ring. Click a notice to open its Settings page (battery, Bluetooth, Wi-Fi).
 - Clicks step through: bar → now-playing pill → full card → opens the playing app. Moving the mouse away collapses it.
+- Hides itself while a fullscreen game, video or presentation is in front, and does no work while hidden.
+- Volume pop-up follows the current output device, so switching to Bluetooth buds keeps working.
 - Right-click: quit.
 
 ## Run

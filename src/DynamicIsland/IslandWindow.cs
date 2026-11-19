@@ -39,6 +39,8 @@ public sealed class IslandWindow : Window
     IslandNotification? _note;
     double _noteUntil, _hudUntil;
     bool _pinned; // pill shown by a click while nothing plays
+    bool _hiddenForFullscreen;
+    double _lastFullscreenCheck;
     HudEvent? _hud;
     DispatcherQueueTimer _slowTick;
     bool _fast;
@@ -180,6 +182,18 @@ public sealed class IslandWindow : Window
         double now = _clock.Elapsed.TotalSeconds;
         float dt = (float)Math.Min(now - _lastTick, 1 / 30.0);
         _lastTick = now;
+
+        if (now - _lastFullscreenCheck > 1) // hide during fullscreen games, videos and presentations; skip all work while hidden
+        {
+            _lastFullscreenCheck = now;
+            bool fullscreen = Native.SHQueryUserNotificationState(out int state) == 0 && state is 2 or 3 or 4;
+            if (fullscreen != _hiddenForFullscreen)
+            {
+                _hiddenForFullscreen = fullscreen;
+                Native.ShowWindow(_hwnd, fullscreen ? 0 /* SW_HIDE */ : 4 /* SW_SHOWNOACTIVATE */);
+            }
+        }
+        if (_hiddenForFullscreen) return;
 
         if ((Native.GetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE) & Native.WS_EX_TOPMOST) == 0) // the shell can drop us out of the topmost band; then clicks hit the window below
             Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);

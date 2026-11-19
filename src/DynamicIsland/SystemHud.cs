@@ -27,6 +27,7 @@ sealed class SystemHud(DispatcherQueue ui)
     static readonly Windows.UI.Color Green = ColorHelper.FromArgb(255, 80, 220, 120), Red = ColorHelper.FromArgb(255, 255, 90, 80);
 
     MMDevice? _speakers; // kept alive so the volume callback keeps firing
+    MMDeviceEnumerator? _devices;
     ManagementEventWatcher? _brightness;
     DeviceWatcher? _bluetooth;
     readonly Dictionary<string, bool> _btConnected = [];
@@ -39,14 +40,13 @@ sealed class SystemHud(DispatcherQueue ui)
 
     public void Start()
     {
-        // shortcut: follows the default speakers at launch only; re-attach on default-device change if switching headphones matters.
         try
         {
-            _speakers = new MMDeviceEnumerator().GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
-            _speakers.AudioEndpointVolume.OnVolumeNotification += d =>
-                Raise(new(d.Muted ? "\uE74F" : "\uE767", d.Muted ? 0 : d.MasterVolume, ""));
+            _devices = new MMDeviceEnumerator();
+            _devices.RegisterEndpointNotificationCallback(new DefaultDeviceWatch(() => ui.TryEnqueue(AttachSpeakers))); // follow switches to buds/headphones
         }
-        catch (Exception ex) { Debug.WriteLine($"Volume unavailable: {ex}"); }
+        catch (Exception ex) { Debug.WriteLine($"Audio device notifications unavailable: {ex}"); }
+        AttachSpeakers();
 
         try // laptop panels only; external monitors don't report brightness through WMI
         {
@@ -80,6 +80,27 @@ sealed class SystemHud(DispatcherQueue ui)
         StartBluetooth();
         NetworkInformation.NetworkStatusChanged += _ => ui.TryEnqueue(CheckWifi);
         CheckWifi(); // remember the current network so we only announce changes
+    }
+
+    void AttachSpeakers()
+    {
+        try
+        {
+            _speakers?.Dispose();
+            _speakers = (_devices ?? new MMDeviceEnumerator()).GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+            _speakers.AudioEndpointVolume.OnVolumeNotification += d =>
+                Raise(new(d.Muted ? "\uE74F" : "\uE767", d.Muted ? 0 : d.MasterVolume, ""));
+        }
+        catch (Exception ex) { Debug.WriteLine($"Volume unavailable: {ex}"); }
+    }
+
+    sealed class DefaultDeviceWatch(Action changed) : NAudio.CoreAudioApi.Interfaces.IMMNotificationClient
+    {
+        public void OnDefaultDeviceChanged(DataFlow flow, Role role, string id) { if (flow == DataFlow.Render && role == Role.Multimedia) changed(); }
+        public void OnDeviceStateChanged(string id, DeviceState state) { }
+        public void OnDeviceAdded(string id) { }
+        public void OnDeviceRemoved(string id) { }
+        public void OnPropertyValueChanged(string id, PropertyKey key) { }
     }
 
     void StartBluetooth()
