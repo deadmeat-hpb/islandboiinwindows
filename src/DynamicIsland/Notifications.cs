@@ -110,9 +110,6 @@ static class NotificationView
 
     public const float CardW = 380, CardH = 168;
 
-    /// <summary>The dismiss (x) button on the expanded card.</summary>
-    public static Rect CloseButton(Rect r, float s) => new(r.Right - 38 * s, r.Y + 12 * s, 26 * s, 26 * s);
-
     /// <summary>Expanded notification: app icon, app name and time, then the full title and message (wrapped, up to ~4 lines).</summary>
     public static void DrawExpanded(CanvasDrawingSession ds, Rect r, float s, IslandNotification n, float a)
     {
@@ -127,13 +124,7 @@ static class NotificationView
             VerticalAlignment = CanvasVerticalAlignment.Center, WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character,
         };
         string when = n.At == default ? "now" : (DateTime.Now - n.At).TotalMinutes < 1 ? "now" : n.At.ToString("HH:mm");
-        ds.DrawText($"{n.App}  ·  {when}", new Rect(x + 48 * s, y + 14 * s, w - 98 * s, 24 * s), faint, app);
-
-        // Dismiss (x)
-        var close = CloseButton(r, s);
-        ds.FillCircle((float)(close.X + close.Width / 2), (float)(close.Y + close.Height / 2), 13 * s, ColorHelper.FromArgb((byte)(30 * a), 255, 255, 255));
-        using var icons = new CanvasTextFormat { FontFamily = "Segoe Fluent Icons", FontSize = 10 * s, HorizontalAlignment = CanvasHorizontalAlignment.Center, VerticalAlignment = CanvasVerticalAlignment.Center };
-        ds.DrawText("", close, dim, icons);
+        ds.DrawText($"{n.App}  ·  {when}", new Rect(x + 48 * s, y + 14 * s, w - 64 * s, 24 * s), faint, app);
 
         using var title = new CanvasTextFormat
         {

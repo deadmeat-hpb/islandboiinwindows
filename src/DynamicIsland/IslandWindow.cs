@@ -75,7 +75,7 @@ public sealed class IslandWindow : Window
         _root.PointerMoved += OnMoved;
         _root.PointerReleased += OnReleased;
         _root.PointerCaptureLost += (_, _) => { if (MediaView.Scrub is not null || HudView.Drag is not null) { MediaView.Scrub = null; HudView.Drag = null; _dirty = true; } EndPress(click: false); };
-        _root.RightTapped += (_, _) => OnRightClick(); // back one stage; quit from Task Manager
+        _root.RightTapped += (_, e) => OnRightClick((float)e.GetPosition(_root).Y * _dpi); // back one stage / dismiss; quit from Task Manager
         Content = _root;
 
         SetupWindow();
@@ -106,6 +106,7 @@ public sealed class IslandWindow : Window
             if (_fullscreen || _mode == Mode.Notify || _mode == Mode.Expanded && e.Text.Length == 0) return; // level bars don't cover a card; battery/Bluetooth/Wi-Fi notices do
             if (_mode == Mode.Expanded) _reopen = true; // the card stays open now, so come back to it after the notice
             bool sameCard = _mode == Mode.Hud && _detail && _hud?.Kind == e.Kind; // the open card just shows the new value
+            if (_mode == Mode.Hud) _leaving = false; // a new value while it was sliding away: it stays
             _hud = e;
             if (!sameCard) { _detail = false; _hudUntil = _clock.Elapsed.TotalSeconds + e.Seconds; }
             SetMode(Mode.Hud); // re-run: a notice is wider than a level bar
@@ -291,9 +292,9 @@ public sealed class IslandWindow : Window
         if (!_fullscreen) UpdateHover(now);
         // Stacking: while a notification or notice is up, the playing media drops below it as its own pill, then pushes back up.
         bool stacked = (_media.Playing || _stackOpen) && _mode is Mode.Notify or Mode.Hud;
-        _stack.Target = stacked ? _top.Target + _h.Target + 8 * _s : 0;
+        _stack.Target = !stacked ? 0 : _leaving ? 6 * _s : _top.Target + _h.Target + 8 * _s; // glides up into the leaving island's place
         (_stackW.Target, _stackH.Target) = _stackOpen ? (MediaCardW, MediaCardH) : (PillW, PillH);
-        bool animating = !_stack.Settled || !_stackW.Settled || !_stackH.Settled || HudView.Drag is not null || _pressed || now - _pulseAt < 0.9 || now - _reachAt < 0.3 || _media.TransitionT < 1 || _media.ArtFadeT < 1 || !(_x.Settled && _w.Settled && _h.Settled && _top.Settled);
+        bool animating = _leaving || !_stack.Settled || !_stackW.Settled || !_stackH.Settled || HudView.Drag is not null || _pressed || now - _pulseAt < 0.9 || now - _reachAt < 0.3 || _media.TransitionT < 1 || _media.ArtFadeT < 1 || !(_x.Settled && _w.Settled && _h.Settled && _top.Settled);
         SetFast(animating);
 
         // Background refraction only refreshes at the slow tick rate when idle, and freezes in battery saver.
@@ -350,21 +351,60 @@ public sealed class IslandWindow : Window
         if (_mode == Mode.Expanded) { } // stays open until clicked
         else if (_mode == Mode.Notify)
         {
-            if (near) _noteUntil = Math.Max(_noteUntil, now + 1); // hovering keeps it open
-            else if (now > _noteUntil) ShowNextNote(now, near);
+            if (near && !_leaving && _noteUntil > 0) _noteUntil = Math.Max(_noteUntil, now + 1); // hovering keeps it open (not once dismissed)
+            if ((!near || _noteUntil == 0 || _leaving) && now > _noteUntil && Leave(now)) ShowNextNote(now, near);
         }
         else if (_notes.Pending.Count > 0) ShowNextNote(now, near);
         else if (_mode == Mode.Hud)
         {
-            if (now > _hudUntil) // the notice leaves; an open media card (stacked or from before) takes the island
+            if (now > _hudUntil && Leave(now)) // the notice slides away; an open media card (stacked or from before) takes the island
             {
                 _detail = false;
-                SetMode(_reopen || _stackOpen ? Mode.Expanded : RestMode(near));
+                SetMode(_reopen || _stackOpen ? Mode.Expanded : StackedRest(now, near));
                 (_reopen, _stackOpen) = (false, false);
             }
         }
         else if (_mode != RestMode(near)) SetMode(RestMode(near));
     }
+
+    // Exit: a notification or notice slides up into the screen edge (ease-in, a little squash, fading), then the next stage takes over.
+    bool _leaving;
+    double _leaveAt;
+    const double LeaveTime = 0.25;
+
+    /// <summary>Starts the slide-up exit and returns false until it has finished; then true (once).</summary>
+    bool Leave(double now)
+    {
+        if (!_leaving)
+        {
+            (_leaving, _leaveAt) = (true, now);
+            SetFast(true);
+            return false;
+        }
+        if (now - _leaveAt < LeaveTime) return false;
+        _leaving = false;
+        // Continue from what's on screen: the stacked media that glided up becomes the island, or the island comes back
+        // down out of the edge it just tucked into.
+        if (_stack.Value > 2 * _s)
+        {
+            (_w.Value, _h.Value, _top.Value) = (_stackW.Value, _stackH.Value, _stack.Value);
+            (_stack.Value, _stack.Velocity) = (0, 0);
+        }
+        else _top.Value = -(_h.Value + 12 * _s);
+        (_w.Velocity, _h.Velocity, _top.Velocity) = (0, 0, 0);
+        return true;
+    }
+
+    /// <summary>After a notice leaves: the stacked media pill that glided up becomes the island's pill for a moment, then the idle rule applies.</summary>
+    Mode StackedRest(double now, bool near)
+    {
+        if (_stack.Value <= 2 * _s || !_media.HasSession) return RestMode(near);
+        (_pinned, _holdUntil) = (true, now + 2);
+        return Mode.Compact;
+    }
+
+    /// <summary>0..1 progress of the slide-up exit (eased in), 0 when not leaving.</summary>
+    float LeaveT => _leaving ? (float)Math.Pow(Math.Clamp((_clock.Elapsed.TotalSeconds - _leaveAt) / LeaveTime, 0, 1), 2) : 0;
 
     /// <summary>Drops the next queued notification down for 5 seconds, or returns to rest when there are none.</summary>
     void ShowNextNote(double now, bool near)
@@ -379,7 +419,7 @@ public sealed class IslandWindow : Window
         else
         {
             _note = null;
-            SetMode(_stackOpen ? Mode.Expanded : RestMode(near)); // an open stacked media card takes the island
+            SetMode(_stackOpen ? Mode.Expanded : StackedRest(now, near)); // an open stacked media card takes the island
             _stackOpen = false;
         }
     }
@@ -388,14 +428,17 @@ public sealed class IslandWindow : Window
     Mode RestMode(bool near) => _pinned ? Mode.Compact : near ? Mode.Hover : Mode.Idle; // the pill only shows after a click; otherwise the slim bar, even while music plays
 
     /// <summary>Right click steps back one stage: card → pill → bar. Notices and pop-ups just close.</summary>
-    void OnRightClick()
+    void OnRightClick(float y)
     {
-        if (_stackOpen) { _stackOpen = false; _dirty = true; return; } // stacked media card → its pill
-        if (_detail) { CollapseDetail(); return; }                   // notice/notification card → its pill
+        if (_stack.Value > 2 * _s && y > _stack.Value) // the stacked media: card → pill; the pill itself can't be dismissed
+        {
+            if (_stackOpen) { _stackOpen = false; _dirty = true; }
+            return;
+        }
         switch (_mode)
         {
             case Mode.Expanded: _pinned = true; SetMode(RestMode(near: true)); break;
-            case Mode.Notify: _noteUntil = 0; break;
+            case Mode.Notify: _noteUntil = 0; break; // notifications and notices, pill or card: slide away (see Leave)
             case Mode.Hud: _hudUntil = 0; break;
             default: _pinned = false; SetMode(RestMode(near: true)); break;
         }
@@ -541,9 +584,8 @@ public sealed class IslandWindow : Window
                 SetMode(Mode.Notify);
                 return;
             }
-            if (!NotificationView.CloseButton(IslandRect(), _s).Contains(new Windows.Foundation.Point(p.X, p.Y)))
-                NotificationSource.Open(_note); // anywhere on the card opens the app; the x just dismisses
-            _noteUntil = 0; // closes on the next tick
+            NotificationSource.Open(_note); // anywhere on the card opens the app (right click dismisses)
+            _noteUntil = 0; // slides away on the next tick
             return;
         }
         if (_mode == Mode.Hud && _hud is { } hud)
@@ -624,6 +666,12 @@ public sealed class IslandWindow : Window
                 if (open > 0.6f) MediaView.DrawExpanded(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, pillAlpha * (open - 0.6f) / 0.4f);
             }, _media.Accent, pillAlpha);
         }
+        float leave = _mode is Mode.Notify or Mode.Hud ? LeaveT : 0;
+        if (leave > 0) // sliding up into the screen edge: rises by its own height, squashes a little
+        {
+            top -= leave * (top + h + 12 * _s);
+            h *= 1 - 0.15f * leave;
+        }
         float expand = Math.Clamp((_h.Value - 14 * _s) / (118 * _s), 0, 1);
         float compactAlpha = _mode == Mode.Compact ? Math.Clamp((_w.Value - 160 * _s) / (50 * _s), 0, 1) : 0;
         float cardAlpha = Math.Clamp((_h.Value / _h.Target - 0.75f) / 0.25f, 0, 1);
@@ -661,6 +709,7 @@ public sealed class IslandWindow : Window
         if (reach is > 0 and < 1) sag = MathF.Max(sag, 8 * _s * MathF.Sin(MathF.PI * reach)); // the underside bulges toward the incoming drop
         float ripple = (float)((clock - _rippleAt) / 0.7);
         MediaView.ArtIn = (float)Math.Clamp((clock - _artInAt - 0.15) / 0.35, 0, 1); // the art arrives last
+        using var fading = leave > 0 ? ds.CreateLayer(1 - 0.9f * leave) : null; // fades as it tucks under the edge
         Glass.Draw(ds, _capture?.Image, _canvasLeftPx, cx, top, w, h, _s, expand, glow, glowStrength, sag, rect =>
         {
             if (compactAlpha > 0)
