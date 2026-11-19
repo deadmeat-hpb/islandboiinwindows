@@ -39,7 +39,7 @@ public sealed class IslandWindow : Window
     IslandNotification? _note;
     double _noteUntil, _hudUntil;
     bool _pinned; // pill shown by a click while nothing plays
-    bool _hiddenForFullscreen;
+    bool _fullscreen;
     double _lastFullscreenCheck;
     HudEvent? _hud;
     DispatcherQueueTimer _slowTick;
@@ -86,7 +86,7 @@ public sealed class IslandWindow : Window
             if (_mode == Mode.Expanded) SetMode(Mode.Expanded); // card size depends on whether anything is playing
             double now = _clock.Elapsed.TotalSeconds;
             // Only a real start: not music already playing at launch, and not the brief pause apps make when skipping songs.
-            if (_media.Playing && !_wasPlaying && now > 3 && now - _stoppedAt > 3 && !_hiddenForFullscreen) FlowIn();
+            if (_media.Playing && !_wasPlaying && now > 3 && now - _stoppedAt > 3 && !_fullscreen) FlowIn();
             if (!_media.Playing && _wasPlaying) _stoppedAt = now;
             _wasPlaying = _media.Playing;
             _dirty = true;
@@ -96,7 +96,7 @@ public sealed class IslandWindow : Window
         var hud = _system = new SystemHud(DispatcherQueue);
         hud.Changed += e =>
         {
-            if (_mode == Mode.Notify || _mode == Mode.Expanded && e.Text.Length == 0) return; // level bars don't cover a card; battery/Bluetooth/Wi-Fi notices do
+            if (_fullscreen || _mode == Mode.Notify || _mode == Mode.Expanded && e.Text.Length == 0) return; // level bars don't cover a card; battery/Bluetooth/Wi-Fi notices do
             if (_mode == Mode.Expanded) _reopen = true; // the card stays open now, so come back to it after the notice
             (_hud, _hudUntil) = (e, _clock.Elapsed.TotalSeconds + e.Seconds);
             SetMode(Mode.Hud); // re-run: a notice is wider than a level bar
@@ -211,21 +211,16 @@ public sealed class IslandWindow : Window
         float dt = (float)Math.Min(now - _lastTick, 1 / 30.0);
         _lastTick = now;
 
-        if (now - _lastFullscreenCheck > 1) // hide during fullscreen games, videos and presentations; skip all work while hidden
+        if (now - _lastFullscreenCheck > 1) // fullscreen games, videos and presentations: never hide, just stay the idle bar
         {
             _lastFullscreenCheck = now;
-            bool fullscreen = Native.SHQueryUserNotificationState(out int state) == 0 && state is 2 or 3 or 4;
-            if (fullscreen != _hiddenForFullscreen)
-            {
-                _hiddenForFullscreen = fullscreen;
-                Native.ShowWindow(_hwnd, fullscreen ? 0 /* SW_HIDE */ : 4 /* SW_SHOWNOACTIVATE */);
-            }
+            _fullscreen = Native.SHQueryUserNotificationState(out int state) == 0 && state is 2 or 3 or 4;
         }
-        if (_hiddenForFullscreen) return;
+        if (_fullscreen && _mode != Mode.Idle) { _pinned = false; SetMode(Mode.Idle); }
 
         if ((Native.GetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE) & Native.WS_EX_TOPMOST) == 0) // the shell can drop us out of the topmost band; then clicks hit the window below
             Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
-        UpdateHover(now);
+        if (!_fullscreen) UpdateHover(now);
         // Stacking: while a notification or notice is up, the playing media drops below it as its own pill, then pushes back up.
         _stack.Target = _media.Playing && _mode is Mode.Notify or Mode.Hud ? _top.Target + _h.Target + 8 * _s : 0;
         bool animating = !_stack.Settled || _pressed || now - _pulseAt < 0.7 || _media.TransitionT < 1 || _media.ArtFadeT < 1 || !(_x.Settled && _w.Settled && _h.Settled && _top.Settled);
@@ -392,6 +387,7 @@ public sealed class IslandWindow : Window
 
     void OnClick()
     {
+        if (_fullscreen) return; // idle bar only while something is fullscreen
         if (_stack.Value > 2 * _s && _pressY > _stack.Value) { _media.OpenApp(); return; } // the stacked media pill
         if (_mode == Mode.Notify && _note is not null)
         {
