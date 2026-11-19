@@ -54,7 +54,7 @@ public sealed class IslandWindow : Window
     Mode _mode = Mode.Idle;
     Spring _x, _w, _h, _top;
     double _lastTick, _lastCapture;
-    bool _minimized, _dirty = true, _pressed, _dragging, _wasAnimating;
+    bool _minimized, _reopen, _dirty = true, _pressed, _dragging, _wasAnimating;
     float _pressX, _pressY, _grabOffset;
     (int, int, int, int) _region = (int.MaxValue, 0, 0, 0);
 
@@ -88,7 +88,8 @@ public sealed class IslandWindow : Window
         var hud = _system = new SystemHud(DispatcherQueue);
         hud.Changed += e =>
         {
-            if (_mode is Mode.Expanded or Mode.Notify) return; // don't cover an open card or a notification
+            if (_mode == Mode.Notify || _mode == Mode.Expanded && e.Text.Length == 0) return; // level bars don't cover a card; battery/Bluetooth/Wi-Fi notices do
+            if (_mode == Mode.Expanded) _reopen = true; // the card stays open now, so come back to it after the notice
             (_hud, _hudUntil) = (e, _clock.Elapsed.TotalSeconds + e.Seconds);
             SetMode(Mode.Hud); // re-run: a notice is wider than a level bar
             _dirty = true;
@@ -259,7 +260,7 @@ public sealed class IslandWindow : Window
             else if (now > _noteUntil) ShowNextNote(now, near);
         }
         else if (_notes.Pending.Count > 0) ShowNextNote(now, near);
-        else if (_mode == Mode.Hud) { if (now > _hudUntil) SetMode(RestMode(near)); }
+        else if (_mode == Mode.Hud) { if (now > _hudUntil) { SetMode(_reopen ? Mode.Expanded : RestMode(near)); _reopen = false; } }
         else if (_mode != RestMode(near)) SetMode(RestMode(near));
     }
 
