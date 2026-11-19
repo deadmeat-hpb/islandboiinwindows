@@ -22,13 +22,15 @@ static class Glass
     static Color White(int a) => Gray(a, 255);
     static Color Gray(int a, byte v) => ColorHelper.FromArgb((byte)Math.Clamp(a, 0, 255), v, v, v);
 
-    public static void Draw(CanvasDrawingSession ds, ICanvasImage? background, float originX, float cx, float top, float w, float h, float s, float expand, Color glow, float glowStrength, Action<Rect>? content)
+    public static void Draw(CanvasDrawingSession ds, ICanvasImage? background, float originX, float cx, float top, float w, float h, float s, float expand, Color glow, float glowStrength, float sag, Action<Rect>? content)
     {
         ds.Transform = Matrix3x2.CreateTranslation(-originX, 0) * Matrix3x2.CreateScale(1f / s); // draw in screen pixels; originX = where the canvas sits
         var rect = new Rect(cx - w / 2, top, w, h);
         float r = MathF.Min(h / 2, 30 * s);
         float attach = Math.Clamp(1 - top / (4 * s), 0, 1); // resting at the screen edge: melt into it with curved shoulders
-        using var shape = attach > 0 ? Attached(ds, rect, r, 12 * s * attach) : RoundRect(ds, rect, r, 0);
+        var outline = attach > 0 ? Attached(ds, rect, r, 12 * s * attach) : RoundRect(ds, rect, r, 0);
+        if (sag > 0.5f) { var dripping = Drip(ds, outline, rect, sag); outline.Dispose(); outline = dripping; }
+        using var shape = outline;
 
         if (expand > 0) DrawShadow(ds, shape, s, expand);
         if (glowStrength > 0) DrawGlow(ds, shape, rect, s, glow, glowStrength);
@@ -155,6 +157,14 @@ static class Glass
         using var a = band.CombineWith(l, Matrix3x2.Identity, CanvasGeometryCombine.Exclude);
         using var b = a.CombineWith(rr, Matrix3x2.Identity, CanvasGeometryCombine.Exclude);
         return body.CombineWith(b, Matrix3x2.Identity, CanvasGeometryCombine.Union);
+    }
+
+    /// <summary>A soft bulge hanging from the bottom middle, like liquid running down while the island opens.</summary>
+    static CanvasGeometry Drip(ICanvasResourceCreator rc, CanvasGeometry shape, Rect rect, float sag)
+    {
+        float rx = (float)rect.Width * 0.38f, ry = MathF.Min(sag * 3, (float)rect.Height); // centred inside the body so it leaves the bottom edge at a shallow angle
+        using var drop = CanvasGeometry.CreateEllipse(rc, (float)(rect.X + rect.Width / 2), (float)rect.Bottom + sag - ry, rx, ry);
+        return shape.CombineWith(drop, Matrix3x2.Identity, CanvasGeometryCombine.Union);
     }
 
     static CanvasGeometry RoundRect(ICanvasResourceCreator rc, Rect rect, float r, float inset)

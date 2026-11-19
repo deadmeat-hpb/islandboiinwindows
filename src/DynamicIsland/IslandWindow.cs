@@ -154,10 +154,10 @@ public sealed class IslandWindow : Window
             Mode.Idle => (84 * _s, 8 * _s, 0f),     // resting shapes hang from the screen edge (see Glass.Attached)
             Mode.Hover => (124 * _s, 16 * _s, 0f),
             Mode.Compact => (210 * _s, 32 * _s, 0f),
-            Mode.Notify => (360 * _s, 72 * _s, 8 * _s),
-            Mode.Hud => ((_hud?.Text.Length > 0 ? 300 : 240) * _s, 32 * _s, 6 * _s), // notices are wider than level bars
-            _ when _media.HasSession => (400 * _s, 150 * _s, 10 * _s),
-            _ => (340 * _s, 96 * _s, 10 * _s),
+            Mode.Notify => (360 * _s, 72 * _s, 0f),
+            Mode.Hud => ((_hud?.Text.Length > 0 ? 300 : 240) * _s, 32 * _s, 0f), // notices are wider than level bars
+            _ when _media.HasSession => (400 * _s, 150 * _s, 0f), // cards pour down out of the top bar too
+            _ => (340 * _s, 96 * _s, 0f),
         };
         ClampX();
         _dirty = true;
@@ -433,7 +433,8 @@ public sealed class IslandWindow : Window
         var a = _media.PrevAccent; var b = _media.Accent;
         var glow = Microsoft.UI.ColorHelper.FromArgb(255, (byte)(a.R + (b.R - a.R) * t), (byte)(a.G + (b.G - a.G) * t), (byte)(a.B + (b.B - a.B) * t));
         float glowStrength = _media.Playing && _mode is Mode.Compact or Mode.Expanded ? 1 : 0; // steady and faint: a pulse read as gimmicky
-        Glass.Draw(ds, _capture?.Image, _canvasLeftPx, cx, top, w, h, _s, expand, glow, glowStrength, rect =>
+        float sag = Math.Clamp(_h.Velocity * 0.012f, 0, 20 * _s); // melting: the bottom drips down while the island grows
+        Glass.Draw(ds, _capture?.Image, _canvasLeftPx, cx, top, w, h, _s, expand, glow, glowStrength, sag, rect =>
         {
             if (compactAlpha > 0) MediaView.DrawCompact(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, compactAlpha);
             if (expandedAlpha > 0) MediaView.DrawExpanded(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, expandedAlpha);
