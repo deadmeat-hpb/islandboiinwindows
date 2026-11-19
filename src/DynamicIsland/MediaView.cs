@@ -49,7 +49,14 @@ static class MediaView
         };
         var box = new Rect(r.X + pad, r.Y, Math.Max(0, r.Width - 2 * pad), r.Height);
         Fonts.DrawTabular(ds, now.ToString("HH:mm"), box, White(a), time);
-        ds.DrawText(now.ToString("ddd M/d", System.Globalization.CultureInfo.CurrentCulture), box, White(0.55f * a), date);
+        if (timeSize < 30) { ds.DrawText(now.ToString("ddd M/d", System.Globalization.CultureInfo.CurrentCulture), box, White(0.55f * a), date); return; }
+        // The card: full date with the week number under it.
+        float half = (float)box.Height / 2;
+        date.VerticalAlignment = CanvasVerticalAlignment.Bottom;
+        ds.DrawText(now.ToString("D", System.Globalization.CultureInfo.CurrentCulture), new Rect(box.X, box.Y, box.Width, half), White(0.7f * a), date);
+        date.VerticalAlignment = CanvasVerticalAlignment.Top;
+        date.FontSize = 12 * s;
+        ds.DrawText($"Week {System.Globalization.ISOWeek.GetWeekOfYear(now)}", new Rect(box.X, box.Y + half + 2 * s, box.Width, half), White(0.45f * a), date);
     }
 
     /// <summary>Expanded card: art, title, artist, progress bar and transport buttons.</summary>

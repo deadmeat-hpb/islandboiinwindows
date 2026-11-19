@@ -74,7 +74,7 @@ public sealed class IslandWindow : Window
         _root.PointerPressed += OnPressed;
         _root.PointerMoved += OnMoved;
         _root.PointerReleased += OnReleased;
-        _root.PointerCaptureLost += (_, _) => { if (MediaView.Scrub is not null) { MediaView.Scrub = null; _dirty = true; } EndPress(click: false); };
+        _root.PointerCaptureLost += (_, _) => { if (MediaView.Scrub is not null || HudView.Drag is not null) { MediaView.Scrub = null; HudView.Drag = null; _dirty = true; } EndPress(click: false); };
         _root.RightTapped += (_, _) => OnRightClick(); // back one stage; quit from Task Manager
         Content = _root;
 
@@ -99,13 +99,15 @@ public sealed class IslandWindow : Window
             string title = _media.Title;
             if (await Task.Run(() => _media.Window(title)) == hwnd) FlowIn(); // same window the card's art click brings forward
         };
-        Native.SetWinEventHook(Native.EVENT_SYSTEM_MINIMIZESTART, Native.EVENT_SYSTEM_MINIMIZESTART, 0, _minimizeProc, 0, 0, Native.WINEVENT_OUTOFCONTEXT);
-        _notes.Start(DispatcherQueue);
+        Native.SetWinEventHook(Native.EVENT_SYSTEM_MINIMIZESTART, Native.EVENT_SYSTEM_MINIMIZESTART, 0, _minimizeProc, 0, 0, Native.WINEVENT_OUTOFCONTEXT);        _notes.Start(DispatcherQueue);
         var hud = _system = new SystemHud(DispatcherQueue);
         hud.Changed += e =>
-        {            if (_fullscreen || _mode == Mode.Notify || _mode == Mode.Expanded && e.Text.Length == 0) return; // level bars don't cover a card; battery/Bluetooth/Wi-Fi notices do
+        {
+            if (_fullscreen || _mode == Mode.Notify || _mode == Mode.Expanded && e.Text.Length == 0) return; // level bars don't cover a card; battery/Bluetooth/Wi-Fi notices do
             if (_mode == Mode.Expanded) _reopen = true; // the card stays open now, so come back to it after the notice
-            (_hud, _hudUntil) = (e, _clock.Elapsed.TotalSeconds + e.Seconds);
+            bool sameCard = _mode == Mode.Hud && _detail && _hud?.Kind == e.Kind; // the open card just shows the new value
+            _hud = e;
+            if (!sameCard) { _detail = false; _hudUntil = _clock.Elapsed.TotalSeconds + e.Seconds; }
             SetMode(Mode.Hud); // re-run: a notice is wider than a level bar
             _dirty = true;
         };
@@ -132,8 +134,7 @@ public sealed class IslandWindow : Window
 
     /// <summary>Media just started: light flows from the app's taskbar button into the island, which glows as it lands.</summary>
     async void FlowIn()
-    {
-        var (cx, top, _, h) = Shape();
+    {        var (cx, top, _, h) = Shape();
         var to = new System.Numerics.Vector2(_monLeft + cx, _monTop + top + h / 2);
         var from = await Task.Run(() => FlowWindow.TaskbarButton(_media.AppName())) // UI Automation into the taskbar: keep it off the UI thread
             ?? new System.Numerics.Vector2(_monLeft + _monW / 2f, _monTop + _monH - 24 * _s);
@@ -142,8 +143,8 @@ public sealed class IslandWindow : Window
             _flow = new FlowWindow();
             _flow.Nearing += () => { _reachAt = _clock.Elapsed.TotalSeconds; _dirty = true; SetFast(true); }; // the underside reaches for the drop
             _flow.Arrived += () =>
-            {                double now = _clock.Elapsed.TotalSeconds;
-                if (_mode is Mode.Idle or Mode.Hover && _media.HasSession && !_fullscreen) // swallow the drop and swell into the pill
+            {
+                double now = _clock.Elapsed.TotalSeconds;                if (_mode is Mode.Idle or Mode.Hover && _media.HasSession) // swallow the drop and swell into the pill (fullscreen was checked when it started)
                 {
                     (_pulseAt, _rippleAt) = (now, now); // only for the bar: if it opened in the meantime, no ripple
                     _pinned = true;
@@ -215,6 +216,8 @@ public sealed class IslandWindow : Window
             Mode.Idle => (84 * _s, 8 * _s, 0f),     // idle and hover melt into the screen edge (see Glass.Attached)
             Mode.Hover => (124 * _s, 16 * _s, 0f),
             Mode.Compact => (210 * _s, 32 * _s, 6 * _s), // everything else drops out of the bar as a floating pill with its full glass rim
+            Mode.Notify when _detail => (NotificationView.CardW * _s, NotificationView.CardH * _s, 8 * _s),
+            Mode.Hud when _detail && _hud is not null => (HudView.CardW * _s, HudView.CardH(_hud, _outputs.Count) * _s, 8 * _s),
             Mode.Notify => (360 * _s, 72 * _s, 8 * _s),
             Mode.Hud => ((_hud?.Text.Length > 0 ? 300 : 240) * _s, 32 * _s, 6 * _s), // notices are wider than level bars
             _ when _media.HasSession => (400 * _s, 150 * _s, 10 * _s),
@@ -222,6 +225,32 @@ public sealed class IslandWindow : Window
         };
         ClampX();
         _dirty = true;
+    }
+
+    // Stacked islands: each one expands in place. _detail = the top notice/notification is open as its card;
+    // _stackOpen = the media pill stacked under it is open as the media card. Only one at a time.
+    bool _detail, _stackOpen;
+    Spring _stackW = new(0, 380, 36), _stackH = new(0, 380, 36);
+    List<AudioOutput> _outputs = [];
+    float MediaCardW => 400 * _s;
+    float MediaCardH => 150 * _s;
+
+    /// <summary>Back from a notice's/notification's card to its pill, which then times out as usual.</summary>
+    void CollapseDetail()
+    {
+        if (!_detail) return;
+        _detail = false;
+        double now = _clock.Elapsed.TotalSeconds;
+        if (_mode == Mode.Notify) _noteUntil = now + 3;
+        if (_mode == Mode.Hud) _hudUntil = now + 2;
+        SetMode(_mode);
+    }
+
+    /// <summary>Where the media card is drawn right now: stacked under a notice, or the island itself.</summary>
+    Windows.Foundation.Rect? MediaRect()
+    {
+        if (_stackOpen && _stack.Value > 2 * _s) return new(_x.Value - _stackW.Value / 2, _stack.Value, _stackW.Value, _stackH.Value);
+        return _mode == Mode.Expanded && _media.HasSession ? IslandRect() : null;
     }
 
     /// <summary>The resting bar shows the time and date while nothing is playing.</summary>
@@ -237,7 +266,7 @@ public sealed class IslandWindow : Window
     /// <summary>The visible shape, including the liquid stretch from horizontal speed.</summary>
     (float cx, float top, float w, float h) Shape()
     {
-        if (_mode is Mode.Expanded or Mode.Notify) return (_x.Value, _top.Value, MathF.Max(_w.Value, 1), MathF.Max(_h.Value, 1)); // cards keep their size while moving
+        if (_mode is Mode.Expanded or Mode.Notify || _detail) return (_x.Value, _top.Value, MathF.Max(_w.Value, 1), MathF.Max(_h.Value, 1)); // cards keep their size while moving
         float speed = MathF.Abs(_x.Velocity);
         float stretch = MathF.Min(speed * 0.045f, 90 * _s);
         float squash = 1 - MathF.Min(speed / 7000f, 0.35f);
@@ -250,7 +279,7 @@ public sealed class IslandWindow : Window
         float dt = (float)Math.Min(now - _lastTick, 1 / 30.0);
         _lastTick = now;
 
-        if (now - _lastFullscreenCheck > 1) // fullscreen games, videos and presentations: never hide, just stay the idle bar
+        if (now - _lastFullscreenCheck > 1 && _flow?.IsPlaying != true) // fullscreen games, videos and presentations: never hide, just stay the idle bar (our own flow overlay doesn't count)
         {
             _lastFullscreenCheck = now;
             _fullscreen = Native.SHQueryUserNotificationState(out int state) == 0 && state is 2 or 3 or 4;
@@ -261,8 +290,10 @@ public sealed class IslandWindow : Window
             Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
         if (!_fullscreen) UpdateHover(now);
         // Stacking: while a notification or notice is up, the playing media drops below it as its own pill, then pushes back up.
-        _stack.Target = _media.Playing && _mode is Mode.Notify or Mode.Hud ? _top.Target + _h.Target + 8 * _s : 0;
-        bool animating = !_stack.Settled || _pressed || now - _pulseAt < 0.9 || now - _reachAt < 0.3 || _media.TransitionT < 1 || _media.ArtFadeT < 1 || !(_x.Settled && _w.Settled && _h.Settled && _top.Settled);
+        bool stacked = (_media.Playing || _stackOpen) && _mode is Mode.Notify or Mode.Hud;
+        _stack.Target = stacked ? _top.Target + _h.Target + 8 * _s : 0;
+        (_stackW.Target, _stackH.Target) = _stackOpen ? (MediaCardW, MediaCardH) : (PillW, PillH);
+        bool animating = !_stack.Settled || !_stackW.Settled || !_stackH.Settled || HudView.Drag is not null || _pressed || now - _pulseAt < 0.9 || now - _reachAt < 0.3 || _media.TransitionT < 1 || _media.ArtFadeT < 1 || !(_x.Settled && _w.Settled && _h.Settled && _top.Settled);
         SetFast(animating);
 
         // Background refraction only refreshes at the slow tick rate when idle, and freezes in battery saver.
@@ -276,7 +307,7 @@ public sealed class IslandWindow : Window
 
         if (animating)
         {
-            _x.Step(dt); _w.Step(dt); _h.Step(dt); _top.Step(dt); _stack.Step(dt);
+            _x.Step(dt); _w.Step(dt); _h.Step(dt); _top.Step(dt); _stack.Step(dt); _stackW.Step(dt); _stackH.Step(dt);
             _dirty = true;
         }
         else if (_wasAnimating) _dirty = true; // one last pass to shrink the click region
@@ -323,22 +354,33 @@ public sealed class IslandWindow : Window
             else if (now > _noteUntil) ShowNextNote(now, near);
         }
         else if (_notes.Pending.Count > 0) ShowNextNote(now, near);
-        else if (_mode == Mode.Hud) { if (now > _hudUntil) { SetMode(_reopen ? Mode.Expanded : RestMode(near)); _reopen = false; } }
+        else if (_mode == Mode.Hud)
+        {
+            if (now > _hudUntil) // the notice leaves; an open media card (stacked or from before) takes the island
+            {
+                _detail = false;
+                SetMode(_reopen || _stackOpen ? Mode.Expanded : RestMode(near));
+                (_reopen, _stackOpen) = (false, false);
+            }
+        }
         else if (_mode != RestMode(near)) SetMode(RestMode(near));
     }
 
     /// <summary>Drops the next queued notification down for 5 seconds, or returns to rest when there are none.</summary>
     void ShowNextNote(double now, bool near)
     {
+        _detail = false;
         if (_notes.Pending.TryDequeue(out var next))
-        {            (_note, _noteUntil) = (next, now + 5);
+        {
+            (_note, _noteUntil) = (next, now + 5);
             SetMode(Mode.Notify);
             _w.Velocity += 600 * _s; // arrival bounce
         }
         else
         {
             _note = null;
-            SetMode(RestMode(near));
+            SetMode(_stackOpen ? Mode.Expanded : RestMode(near)); // an open stacked media card takes the island
+            _stackOpen = false;
         }
     }
 
@@ -348,6 +390,8 @@ public sealed class IslandWindow : Window
     /// <summary>Right click steps back one stage: card → pill → bar. Notices and pop-ups just close.</summary>
     void OnRightClick()
     {
+        if (_stackOpen) { _stackOpen = false; _dirty = true; return; } // stacked media card → its pill
+        if (_detail) { CollapseDetail(); return; }                   // notice/notification card → its pill
         switch (_mode)
         {
             case Mode.Expanded: _pinned = true; SetMode(RestMode(near: true)); break;
@@ -364,8 +408,10 @@ public sealed class IslandWindow : Window
         if (animating) (w, h) = (MathF.Max(w, _w.Target * 1.2f), MathF.Max(h, _h.Target * 1.2f)); // cover the target + overshoot up front so the region grows once
         float pad = (_mode is Mode.Expanded or Mode.Notify ? 34 : _mode == Mode.Compact ? 26 : 12) * _s; // compact leaves room for the album glow
         static int Snap4(float v) => (int)MathF.Round(v / 4) * 4; // fewer region updates while animating
-        float bottom = MathF.Max(top + h, MathF.Max(_stack.Value, _stack.Target) + PillH); // include the stacked media pill
-        var region = (Math.Max(0, Snap4(cx - MathF.Max(w, PillW) / 2 - pad)), 0, Math.Min(_monW, Snap4(cx + MathF.Max(w, PillW) / 2 + pad)), Math.Min(_stripH, Snap4(bottom + pad)));
+        if (_detail) pad = 34 * _s;
+        float sw = MathF.Max(PillW, MathF.Max(_stackW.Value, _stackW.Target)), sh = MathF.Max(PillH, MathF.Max(_stackH.Value, _stackH.Target));
+        float bottom = MathF.Max(top + h, MathF.Max(_stack.Value, _stack.Target) + sh); // include the stacked pill or card
+        var region = (Math.Max(0, Snap4(cx - MathF.Max(w, sw) / 2 - pad)), 0, Math.Min(_monW, Snap4(cx + MathF.Max(w, sw) / 2 + pad)), Math.Min(_stripH, Snap4(bottom + pad)));
         if (animating) // only grow while moving: resizing the region every frame makes DWM stutter
             region = (Math.Min(region.Item1, _region.Item1), 0, Math.Max(region.Item3, _region.Item3), Math.Max(region.Item4, _region.Item4));
         if (region == _region) return;
@@ -381,10 +427,19 @@ public sealed class IslandWindow : Window
     void OnPressed(object sender, PointerRoutedEventArgs e)
     {
         if (!e.GetCurrentPoint(_root).Properties.IsLeftButtonPressed) return;
-        if (_mode == Mode.Expanded && _media.HasSession && _media.CanSeek
-            && MediaView.HitProgress(IslandRect(), _s, new(PointerX(e), PointerY(e))) is float f) // grab the progress bar: scrub, seek on release
+        var p = new System.Numerics.Vector2(PointerX(e), PointerY(e));
+        if (MediaRect() is { } media && _media.CanSeek && MediaView.HitProgress(media, _s, p) is float f) // grab the progress bar: scrub, seek on release
         {
             MediaView.Scrub = f;
+            _root.CapturePointer(e.Pointer);
+            _dirty = true;
+            return;
+        }
+        if (_mode == Mode.Hud && _detail && _hud is { Kind: HudKind.Volume or HudKind.Brightness } hud
+            && HudView.Hit(IslandRect(), _s, hud, _outputs.Count, p) == "slider") // grab the level slider
+        {
+            HudView.Drag = HudView.SliderValue(IslandRect(), _s, p.X);
+            if (hud.Kind == HudKind.Volume) _system?.SetVolume(HudView.Drag.Value);
             _root.CapturePointer(e.Pointer);
             _dirty = true;
             return;
@@ -401,9 +456,16 @@ public sealed class IslandWindow : Window
 
     void OnMoved(object sender, PointerRoutedEventArgs e)
     {
-        if (MediaView.Scrub is not null)
+        if (HudView.Drag is not null)
         {
-            var bar = MediaView.ProgressBar(IslandRect(), _s);
+            HudView.Drag = HudView.SliderValue(IslandRect(), _s, PointerX(e));
+            if (_hud?.Kind == HudKind.Volume) _system?.SetVolume(HudView.Drag.Value); // live; brightness is set on release (WMI is slow)
+            _dirty = true;
+            return;
+        }
+        if (MediaView.Scrub is not null && MediaRect() is { } media)
+        {
+            var bar = MediaView.ProgressBar(media, _s);
             MediaView.Scrub = (float)Math.Clamp((PointerX(e) - bar.X) / bar.Width, 0, 1);
             _dirty = true;
             return;
@@ -424,6 +486,14 @@ public sealed class IslandWindow : Window
     void OnReleased(object sender, PointerRoutedEventArgs e)
     {
         if (MediaView.Scrub is float f) { MediaView.Scrub = null; _media.Seek(f); _dirty = true; }
+        if (HudView.Drag is float level)
+        {
+            HudView.Drag = null;
+            if (_hud?.Kind == HudKind.Brightness) _ = Task.Run(() => SystemHud.SetBrightness(level));
+            _dirty = true;
+            _root.ReleasePointerCapture(e.Pointer);
+            return;
+        }
         EndPress(click: true);
         _root.ReleasePointerCapture(e.Pointer);
     }
@@ -444,29 +514,62 @@ public sealed class IslandWindow : Window
 
     void OnClick()
     {        if (_fullscreen) return; // idle bar only while something is fullscreen
-        if (_stack.Value > 2 * _s && _pressY > _stack.Value) { _media.OpenApp(); return; } // the stacked media pill
-        if (_mode == Mode.Notify && _note is not null)
+        var p = new System.Numerics.Vector2(_pressX, _pressY);
+        bool onStack = _stack.Value > 2 * _s && _pressY > _stack.Value;
+        if (onStack && !_stackOpen) // the stacked media pill opens into the media card in place; the notice above stays a pill
         {
-            NotificationSource.Open(_note);
-            _noteUntil = 0; // closes on the next tick
+            CollapseDetail();
+            _stackOpen = true;
+            _dirty = true;
             return;
         }
-        if (_mode == Mode.Expanded && _media.HasSession)
+        if (MediaRect() is { } media && (onStack || _mode == Mode.Expanded)) // media card: controls, and the album art brings the app forward
         {
-            var (cx, top, w, h) = Shape();
-            switch (MediaView.HitButton(new Windows.Foundation.Rect(cx - w / 2, top, w, h), _s, new System.Numerics.Vector2(_pressX, _pressY)))
+            switch (MediaView.HitButton(media, _s, p))
             {
                 case 0: _media.Previous(); return;
                 case 1: _media.TogglePlay(); return;
                 case 2: _media.Next(); return;
             }
+            if (onStack) { if (MediaView.ArtRect(media, _s).Contains(new Windows.Foundation.Point(p.X, p.Y))) _media.OpenApp(); return; }
         }
-
-        if (_mode == Mode.Hud && _hud?.Settings is { } page) // battery / Bluetooth / Wi-Fi notices open their Settings page
+        if (_mode == Mode.Notify && _note is not null)
         {
-            try { Process.Start(new ProcessStartInfo(page) { UseShellExecute = true }); }
-            catch (Exception ex) { Debug.WriteLine($"Couldn't open {page}: {ex.Message}"); }
-            _hudUntil = 0;
+            if (!_detail) // pill → card; it stays until closed
+            {
+                (_detail, _stackOpen, _noteUntil) = (true, false, double.MaxValue);
+                SetMode(Mode.Notify);
+                return;
+            }
+            if (!NotificationView.CloseButton(IslandRect(), _s).Contains(new Windows.Foundation.Point(p.X, p.Y)))
+                NotificationSource.Open(_note); // anywhere on the card opens the app; the x just dismisses
+            _noteUntil = 0; // closes on the next tick
+            return;
+        }
+        if (_mode == Mode.Hud && _hud is { } hud)
+        {
+            if (!_detail) // notice pill → its card; it stays until closed
+            {
+                if (hud.Kind == HudKind.Volume) _outputs = _system?.Outputs() ?? [];
+                (_detail, _stackOpen, _hudUntil) = (true, false, double.MaxValue);
+                SetMode(Mode.Hud);
+                return;
+            }
+            string? hit = HudView.Hit(IslandRect(), _s, hud, _outputs.Count, p);
+            if (hit == "mute") _system?.ToggleMute();
+            else if (hit?.StartsWith("out:") == true && int.TryParse(hit[4..], out int i) && i < _outputs.Count)
+            {
+                SystemHud.SetDefaultOutput(_outputs[i].Id);
+                _outputs = _system?.Outputs() ?? _outputs; // the volume listener follows the new default device on its own
+                SetMode(Mode.Hud);
+            }
+            else if (hit == "settings" && hud.Settings is { } page)
+            {
+                try { Process.Start(new ProcessStartInfo(page) { UseShellExecute = true }); }
+                catch (Exception ex) { Debug.WriteLine($"Couldn't open {page}: {ex.Message}"); }
+                _hudUntil = 0;
+            }
+            _dirty = true;
             return;
         }
 
@@ -510,11 +613,16 @@ public sealed class IslandWindow : Window
     void Draw(CanvasDrawingSession ds)
     {
         var (cx, top, w, h) = Shape();
-        if (_stack.Value > 2 * _s) // stacked media pill, drawn first so the notification covers it as it tucks back up
+        if (_stack.Value > 2 * _s) // stacked media pill (or its card), drawn first so the notification covers it as it tucks back up
         {
             float pillAlpha = Math.Clamp(_stack.Value / (24 * _s), 0, 1);
-            Glass.Draw(ds, _capture?.Image, _canvasLeftPx, cx, _stack.Value, PillW, PillH, _s, 0, _media.Accent, 0, 0,
-                rect => MediaView.DrawCompact(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, pillAlpha), _media.Accent, pillAlpha);
+            float sw = MathF.Max(_stackW.Value, 1), sh = MathF.Max(_stackH.Value, 1);
+            float open = Math.Clamp((sh - PillH) / (MediaCardH - PillH), 0, 1); // 0 = pill, 1 = card
+            Glass.Draw(ds, _capture?.Image, _canvasLeftPx, cx, _stack.Value, sw, sh, _s, open, _media.Accent, 0, 0, rect =>
+            {
+                if (open < 0.5f) MediaView.DrawCompact(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, pillAlpha * (1 - 2 * open));
+                if (open > 0.6f) MediaView.DrawExpanded(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, pillAlpha * (open - 0.6f) / 0.4f);
+            }, _media.Accent, pillAlpha);
         }
         float expand = Math.Clamp((_h.Value - 14 * _s) / (118 * _s), 0, 1);
         float compactAlpha = _mode == Mode.Compact ? Math.Clamp((_w.Value - 160 * _s) / (50 * _s), 0, 1) : 0;
@@ -543,7 +651,7 @@ public sealed class IslandWindow : Window
         washStrength *= 1 + 0.5f * landed; // the inner light brightens a touch at the flow's impact, then settles
         glowStrength = MathF.Max(glowStrength, 0.25f * landed); // barely-there light spilling as the flow lands
         // Melting: the bottom drips down while the card grows. Not for the pill: there the drop read as a second pill popping out underneath.
-        float sag = _mode is Mode.Expanded or Mode.Notify ? Math.Clamp(_h.Velocity * 0.012f, 0, 20 * _s) : 0;
+        float sag = _mode is Mode.Expanded or Mode.Notify || _detail ? Math.Clamp(_h.Velocity * 0.012f, 0, 20 * _s) : 0;
         float reach = (float)Math.Clamp((clock - _reachAt) / 0.25, 0, 1);
         if (reach is > 0 and < 1) sag = MathF.Max(sag, 8 * _s * MathF.Sin(MathF.PI * reach)); // the underside bulges toward the incoming drop
         float ripple = (float)((clock - _rippleAt) / 0.7);
@@ -556,8 +664,16 @@ public sealed class IslandWindow : Window
                 else MediaView.DrawClock(ds, rect, _s, compactAlpha, 20);
             }
             if (expandedAlpha > 0) MediaView.DrawExpanded(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, expandedAlpha);
-            if (note is not null && cardAlpha > 0) NotificationView.Draw(ds, rect, _s, note, cardAlpha);
-            if (hudEvent is not null && hudAlpha > 0) HudView.Draw(ds, rect, _s, hudEvent, hudAlpha);
+            if (note is not null && cardAlpha > 0)
+            {
+                if (_detail) NotificationView.DrawExpanded(ds, rect, _s, note, cardAlpha);
+                else NotificationView.Draw(ds, rect, _s, note, cardAlpha);
+            }
+            if (hudEvent is not null)
+            {
+                if (_detail) { if (cardAlpha > 0) HudView.DrawExpanded(ds, rect, _s, hudEvent, cardAlpha, _system, _outputs); }
+                else if (hudAlpha > 0 && _h.Value < 40 * _s) HudView.Draw(ds, rect, _s, hudEvent, hudAlpha);
+            }
             if (clockAlpha > 0) DrawClock(ds, rect, clockAlpha);
             if (ripple is > 0 and < 1) // soft ring running out along the glass from where the drop hit
             {

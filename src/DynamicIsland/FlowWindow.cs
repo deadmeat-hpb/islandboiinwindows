@@ -31,6 +31,7 @@ sealed class FlowWindow : Window
     bool _running;
 
     public event Action? Arrived;
+    public bool IsPlaying => _running;
     /// <summary>Just before the drop touches the island, so it can reach out to meet it.</summary>
     public event Action? Nearing;
     bool _neared;
@@ -74,7 +75,9 @@ sealed class FlowWindow : Window
         var origin = new Vector2(monitor.X, monitor.Y);
         (_from, _to, _color, _s) = (from - origin, to - origin, color, s);
         _bead?.Dispose(); _halo?.Dispose(); (_bead, _halo) = (null, null); // rebuilt in the new colour on the first frame
-        AppWindow.MoveAndResize(monitor);
+        // 1 px short of the monitor: a click-through overlay that exactly covers it makes Windows report a fullscreen app
+        // (QUNS_BUSY), which the island treats as "stay the idle bar".
+        AppWindow.MoveAndResize(new RectInt32(monitor.X, monitor.Y, monitor.Width, monitor.Height - 1));
         AppWindow.Show(false); // don't take focus from the app
         Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
         _clock.Restart();
