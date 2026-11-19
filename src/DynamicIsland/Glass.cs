@@ -71,21 +71,20 @@ static class Glass
         var c = new Vector2((float)(rect.X + rect.Width / 2), (float)(rect.Y + rect.Height / 2));
         float hw = (float)rect.Width / 2, hh = (float)rect.Height / 2;
 
-        // Body: a touch of magnification, like thick glass.
-        using (var body = RoundRect(ds, rect, r, 0))
-            DrawLens(ds, glass, origin, body, c, hw, hh, -0.04f * MathF.Min(hw, hh));
-
-        // Rim: rings that bend more strongly toward the edge.
+        // Rim rings bend more strongly toward the edge. Painted outside-in, each clipped to a smaller rounded rect,
+        // so the next one covers the inside; cheaper than clipping to exact ring shapes (no geometry combine per frame).
         float band = MathF.Min(12 * s, MathF.Min(hw, hh) * 0.7f);
-        const int rings = 5;
+        const int rings = 3; // 5 cost ~4 ms more per frame on integrated GPUs
         for (int i = 0; i < rings; i++)
         {
             float t = 1 - (i + 0.5f) / rings; // 1 at the edge, 0 inside
-            using var outer = RoundRect(ds, rect, r, band * i / rings);
-            using var inner = RoundRect(ds, rect, r, band * (i + 1) / rings);
-            using var ring = outer.CombineWith(inner, Matrix3x2.Identity, CanvasGeometryCombine.Exclude);
-            DrawLens(ds, glass, origin, ring, c, hw, hh, band * 1.6f * t * t);
+            using var clip = RoundRect(ds, rect, r, band * i / rings);
+            DrawLens(ds, glass, origin, clip, c, hw, hh, band * 1.6f * t * t);
         }
+
+        // Body: a touch of magnification, like thick glass.
+        using (var body = RoundRect(ds, rect, r, band))
+            DrawLens(ds, glass, origin, body, c, hw, hh, -0.04f * MathF.Min(hw, hh));
     }
 
     /// <summary>Draws <paramref name="src"/> inside <paramref name="clip"/>, sampling from <paramref name="d"/> px further out at the edge.</summary>

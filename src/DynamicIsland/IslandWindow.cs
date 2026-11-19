@@ -50,7 +50,8 @@ public sealed class IslandWindow : Window
         SystemBackdrop = new WinUIEx.TransparentTintBackdrop();
 
         _canvas = new CanvasControl { ClearColor = Colors.Transparent };
-        _canvas.Draw += (_, e) => Draw(e.DrawingSession);
+        // Re-invalidate from Draw while animating: invalidating only from CompositionTarget.Rendering lands every other frame (30 fps on 60 Hz).
+        _canvas.Draw += (_, e) => { Draw(e.DrawingSession); if (_wasAnimating) _canvas.Invalidate(); };
         _root = new Grid { Background = new SolidColorBrush(Colors.Transparent), Children = { _canvas } };
         _root.PointerPressed += OnPressed;
         _root.PointerMoved += OnMoved;
@@ -77,7 +78,7 @@ public sealed class IslandWindow : Window
         SetMode(Mode.Idle);
         UpdateRegion();
 
-        try { _capture = new ScreenCapture(CanvasDevice.GetSharedDevice(), _monitor); }
+        try { _capture = new ScreenCapture(CanvasDevice.GetSharedDevice(), _monitor, _stripH + 64); } // + room for the lens pad below the island
         catch (Exception ex) { Debug.WriteLine($"Screen capture unavailable, using solid glass: {ex}"); }
 
         CompositionTarget.Rendering += OnTick;

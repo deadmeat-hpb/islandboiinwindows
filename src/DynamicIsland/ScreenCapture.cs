@@ -14,12 +14,15 @@ sealed class ScreenCapture : IDisposable
     readonly CanvasDevice _device;
     readonly Direct3D11CaptureFramePool _pool;
     readonly GraphicsCaptureSession _session;
+    readonly int _height;
 
     public CanvasRenderTarget? Image { get; private set; }
 
-    public ScreenCapture(CanvasDevice device, nint monitor)
+    /// <param name="height">How many rows from the top of the monitor to keep.</param>
+    public ScreenCapture(CanvasDevice device, nint monitor, int height)
     {
         _device = device;
+        _height = height;
         var item = CreateItemForMonitor(monitor);
         _pool = Direct3D11CaptureFramePool.CreateFreeThreaded(device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, item.Size);
         _session = _pool.CreateCaptureSession(item);
@@ -38,13 +41,14 @@ sealed class ScreenCapture : IDisposable
         using (latest)
         using (var src = CanvasBitmap.CreateFromDirect3D11Surface(_device, latest.Surface, 96))
         {
-            var size = src.SizeInPixels;
-            if (Image is null || Image.SizeInPixels.Width != size.Width || Image.SizeInPixels.Height != size.Height)
+            // Only the top band is ever sampled; copying the whole monitor every frame was most of the GPU load.
+            uint w = src.SizeInPixels.Width, h = Math.Min(src.SizeInPixels.Height, (uint)_height);
+            if (Image is null || Image.SizeInPixels.Width != w || Image.SizeInPixels.Height != h)
             {
                 Image?.Dispose();
-                Image = new CanvasRenderTarget(_device, size.Width, size.Height, 96);
+                Image = new CanvasRenderTarget(_device, w, h, 96);
             }
-            Image.CopyPixelsFromBitmap(src);
+            Image.CopyPixelsFromBitmap(src, 0, 0, 0, 0, (int)w, (int)h);
         }
         return true;
     }
