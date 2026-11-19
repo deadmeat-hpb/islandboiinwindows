@@ -21,7 +21,7 @@ static class MediaView
     public static void DrawCompact(CanvasDrawingSession ds, Rect r, float s, MediaSource m, double time, float a)
     {
         float size = (float)r.Height - 10 * s;
-        DrawArt(ds, m.Art, new Rect(r.X + 7 * s, r.Y + 5 * s, size, size), 5 * s, a);
+        Slide(m, 10 * s, a, (dx, al, art, _, _) => DrawArt(ds, art, new Rect(r.X + 7 * s + dx, r.Y + 5 * s, size, size), 5 * s, al));
 
         float cy = (float)(r.Y + r.Height / 2), x0 = (float)r.Right - 14 * s - 4 * 6 * s;
         for (int i = 0; i < 4; i++)
@@ -53,12 +53,15 @@ static class MediaView
             return;
         }
 
-        DrawArt(ds, m.Art, new Rect(x + 20 * s, y + 20 * s, 64 * s, 64 * s), 12 * s, a);
         // Title + artist take the left half when there's a lyric; the synced line sits in the right half, beside them.
         string lyric = m.CurrentLyric;
         float textW = w - 118 * s, tw = lyric.Length > 0 ? textW * 0.5f : textW;
-        ds.DrawText(m.Title, new Rect(x + 98 * s, y + 28 * s, tw, 24 * s), White(a), title);
-        ds.DrawText(m.Artist, new Rect(x + 98 * s, y + 54 * s, tw, 20 * s), White(0.65f * a), sub);
+        Slide(m, 28 * s, a, (dx, al, art, t, ar) =>
+        {
+            DrawArt(ds, art, new Rect(x + 20 * s + dx, y + 20 * s, 64 * s, 64 * s), 12 * s, al);
+            ds.DrawText(t, new Rect(x + 98 * s + dx, y + 28 * s, tw, 24 * s), White(al), title);
+            ds.DrawText(ar, new Rect(x + 98 * s + dx, y + 54 * s, tw, 20 * s), White(0.65f * al), sub);
+        });
         if (lyric.Length > 0)
         {
             using var lyricFormat = new CanvasTextFormat
@@ -85,6 +88,17 @@ static class MediaView
             string glyph = i == 1 && !m.Playing ? "" : Glyphs[i];
             ds.DrawText(glyph, new Rect(centers[i].X - 20 * s, centers[i].Y - 20 * s, 40 * s, 40 * s), White(a), icons);
         }
+    }
+
+    /// <summary>
+    /// Song change: the previous song slides left and fades out while the new one slides in from the right (ease-out).
+    /// <paramref name="draw"/> gets (x offset, alpha, art, title, artist).
+    /// </summary>
+    static void Slide(MediaSource m, float distance, float a, Action<float, float, CanvasBitmap?, string, string> draw)
+    {
+        float t = m.TransitionT, e = 1 - MathF.Pow(1 - t, 3);
+        if (t < 1 && m.PrevTitle.Length > 0) draw(-e * distance, (1 - e) * a, m.PrevArt, m.PrevTitle, m.PrevArtist);
+        draw((1 - e) * distance, e * a, m.Art, m.Title, m.Artist);
     }
 
     /// <summary>0 = previous, 1 = play/pause, 2 = next, -1 = none.</summary>
