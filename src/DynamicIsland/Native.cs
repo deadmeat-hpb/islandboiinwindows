@@ -17,6 +17,9 @@ static class Native
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] public static extern nint GetWindowLongPtr(nint hwnd, int index);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] public static extern nint SetWindowLongPtr(nint hwnd, int index, nint value);
     [DllImport("user32.dll")] public static extern bool SetWindowDisplayAffinity(nint hwnd, uint affinity);
+    public const nint WS_EX_TOPMOST = 0x8, HWND_TOPMOST = -1;
+    public const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOACTIVATE = 0x10;
+    [DllImport("user32.dll")] public static extern bool SetWindowPos(nint hwnd, nint after, int x, int y, int cx, int cy, uint flags);
     [DllImport("user32.dll")] public static extern int SetWindowRgn(nint hwnd, nint hrgn, bool redraw);
     [DllImport("gdi32.dll")] public static extern nint CreateRectRgn(int left, int top, int right, int bottom);
     [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);

@@ -93,7 +93,7 @@ public sealed class IslandWindow : Window
         hud.Start();
 
         _x = new Spring(LoadPosition() * _monW, 520, 34); // stiff-ish follow: lags a little behind the cursor while dragging
-        _w = new Spring(0, 300, 20);                       // width keeps a little bounce
+        _w = new Spring(0, 380, 36);                       // same near-critical damping as height: a bouncing width reads as wobble
         _h = new Spring(0, 380, 36);                       // height barely overshoots: a bouncing bottom edge clips the card's buttons
         _top = new Spring(0, 380, 36);
         SetMode(Mode.Idle);
@@ -180,6 +180,8 @@ public sealed class IslandWindow : Window
         float dt = (float)Math.Min(now - _lastTick, 1 / 30.0);
         _lastTick = now;
 
+        if ((Native.GetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE) & Native.WS_EX_TOPMOST) == 0) // the shell can drop us out of the topmost band; then clicks hit the window below
+            Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
         UpdateHover(now);
         bool animating = _pressed || !(_x.Settled && _w.Settled && _h.Settled && _top.Settled);
         SetFast(animating);
@@ -303,7 +305,7 @@ public sealed class IslandWindow : Window
     {
         if (!_pressed) return;
         float x = PointerX(e);
-        if (!_dragging && MathF.Abs(x - _pressX) > 5 * _s)
+        if (!_dragging && _mode != Mode.Expanded && MathF.Abs(x - _pressX) > 5 * _s) // the open card is for clicks; drag the bar or pill
         {
             _dragging = true;
             if (_mode == Mode.Idle) SetMode(Mode.Hover);
