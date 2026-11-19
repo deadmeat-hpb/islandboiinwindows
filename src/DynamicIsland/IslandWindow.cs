@@ -95,6 +95,7 @@ public sealed class IslandWindow : Window
         _minimizeProc = async (_, _, hwnd, idObject, _, _, _) =>
         {
             if (idObject != 0 || !_media.Playing || _fullscreen) return; // OBJID_WINDOW only
+            if (_mode is not (Mode.Idle or Mode.Hover)) return; // already showing the pill or card: nothing to announce
             string title = _media.Title;
             if (await Task.Run(() => _media.Window(title)) == hwnd) FlowIn(); // same window the card's art click brings forward
         };
@@ -142,9 +143,9 @@ public sealed class IslandWindow : Window
             _flow.Nearing += () => { _reachAt = _clock.Elapsed.TotalSeconds; _dirty = true; SetFast(true); }; // the underside reaches for the drop
             _flow.Arrived += () =>
             {                double now = _clock.Elapsed.TotalSeconds;
-                (_pulseAt, _rippleAt) = (now, now);
                 if (_mode is Mode.Idle or Mode.Hover && _media.HasSession && !_fullscreen) // swallow the drop and swell into the pill
                 {
+                    (_pulseAt, _rippleAt) = (now, now); // only for the bar: if it opened in the meantime, no ripple
                     _pinned = true;
                     _holdUntil = now + 3; // the mouse is down at the taskbar: keep the pill up a moment before the idle rule takes it back
                     SetMode(Mode.Compact);
