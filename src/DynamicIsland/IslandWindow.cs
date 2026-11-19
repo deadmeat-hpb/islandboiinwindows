@@ -53,8 +53,8 @@ public sealed class IslandWindow : Window
 
     Mode _mode = Mode.Idle;
     Spring _x, _w, _h, _top;
-    double _lastTick, _lastCapture, _leftAt = -1;
-    bool _dirty = true, _pressed, _dragging, _wasAnimating;
+    double _lastTick, _lastCapture;
+    bool _minimized, _dirty = true, _pressed, _dragging, _wasAnimating;
     float _pressX, _pressY, _grabOffset;
     (int, int, int, int) _region = (int.MaxValue, 0, 0, 0);
 
@@ -71,7 +71,7 @@ public sealed class IslandWindow : Window
         _root.PointerMoved += OnMoved;
         _root.PointerReleased += OnReleased;
         _root.PointerCaptureLost += (_, _) => EndPress(click: false);
-        _root.RightTapped += (_, _) => Application.Current.Exit();
+        _root.RightTapped += (_, _) => OnRightClick(); // back one stage; quit from Task Manager
         Content = _root;
 
         SetupWindow();
@@ -171,6 +171,7 @@ public sealed class IslandWindow : Window
     /// <summary>The visible shape, including the liquid stretch from horizontal speed.</summary>
     (float cx, float top, float w, float h) Shape()
     {
+        if (_mode is Mode.Expanded or Mode.Notify) return (_x.Value, _top.Value, MathF.Max(_w.Value, 1), MathF.Max(_h.Value, 1)); // cards keep their size while moving
         float speed = MathF.Abs(_x.Velocity);
         float stretch = MathF.Min(speed * 0.045f, 90 * _s);
         float squash = 1 - MathF.Min(speed / 7000f, 0.35f);
@@ -205,8 +206,8 @@ public sealed class IslandWindow : Window
         // Each background refresh costs a full redraw; the idle bar is thin, so 4 Hz is enough there.
         bool captureDue = animating || (_mode != Mode.Idle || now - _lastCapture > 0.25) && PowerManager.EnergySaverStatus != EnergySaverStatus.On;
         if (captureDue && _capture?.TryUpdate() == true) { _dirty = true; _lastCapture = now; }
-        bool playing = _media.Playing && _mode is Mode.Compact or Mode.Expanded;
-        if (playing) _dirty = true; // waveform + progress bar move
+        bool playing = (_media.Playing || _mode == Mode.Expanded && MediaView.TitleScrolls) && _mode is Mode.Compact or Mode.Expanded;
+        if (playing) _dirty = true; // waveform, progress bar and scrolling title move
         _slowTick.Interval = TimeSpan.FromMilliseconds(playing ? 33 : 66); // waveform needs ~30 fps to look alive
 
         if (animating)
@@ -251,12 +252,7 @@ public sealed class IslandWindow : Window
         bool near = px >= cx - w / 2 - m && px <= cx + w / 2 + m && py <= top + h + m && py >= -m;
 
         if (!near && _mode != Mode.Expanded) _pinned = false;
-        if (_mode == Mode.Expanded)
-        {
-            if (near) _leftAt = -1;
-            else if (_leftAt < 0) _leftAt = now;
-            else if (now - _leftAt > 0.8) { _leftAt = -1; SetMode(RestMode(near: false)); }
-        }
+        if (_mode == Mode.Expanded) { } // stays open until clicked
         else if (_mode == Mode.Notify)
         {
             if (near) _noteUntil = Math.Max(_noteUntil, now + 1); // hovering keeps it open
@@ -284,7 +280,19 @@ public sealed class IslandWindow : Window
     }
 
     /// <summary>What the island shows when not expanded: compact player while music plays, else the bar (swollen on hover).</summary>
-    Mode RestMode(bool near) => _media.Playing || _pinned && _media.HasSession ? Mode.Compact : near ? Mode.Hover : Mode.Idle;
+    Mode RestMode(bool near) => !_minimized && (_media.Playing || _pinned && _media.HasSession) ? Mode.Compact : near ? Mode.Hover : Mode.Idle;
+
+    /// <summary>Right click steps back one stage: card → pill → bar. Notices and pop-ups just close.</summary>
+    void OnRightClick()
+    {
+        switch (_mode)
+        {
+            case Mode.Expanded: _pinned = true; SetMode(RestMode(near: true)); break;
+            case Mode.Notify: _noteUntil = 0; break;
+            case Mode.Hud: _hudUntil = 0; break;
+            default: _minimized = true; _pinned = false; SetMode(RestMode(near: true)); break;
+        }
+    }
 
     /// <summary>Only the island (plus a small margin) takes clicks; the rest of the strip passes them through.</summary>
     void UpdateRegion(bool animating = false)
@@ -354,6 +362,7 @@ public sealed class IslandWindow : Window
 
     void OnClick()
     {
+        _minimized = false;
         if (_mode == Mode.Notify && _note is not null)
         {
             NotificationSource.Open(_note);
@@ -427,7 +436,7 @@ public sealed class IslandWindow : Window
         Glass.Draw(ds, _capture?.Image, _canvasLeftPx, cx, top, w, h, _s, expand, glow, glowStrength, rect =>
         {
             if (compactAlpha > 0) MediaView.DrawCompact(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, compactAlpha);
-            if (expandedAlpha > 0) MediaView.DrawExpanded(ds, rect, _s, _media, expandedAlpha);
+            if (expandedAlpha > 0) MediaView.DrawExpanded(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, expandedAlpha);
             if (note is not null && cardAlpha > 0) NotificationView.Draw(ds, rect, _s, note, cardAlpha);
             if (hudEvent is not null && hudAlpha > 0) HudView.Draw(ds, rect, _s, hudEvent, hudAlpha);
         });

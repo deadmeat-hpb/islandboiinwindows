@@ -32,7 +32,7 @@ static class MediaView
     }
 
     /// <summary>Expanded card: art, title, artist, progress bar and transport buttons.</summary>
-    public static void DrawExpanded(CanvasDrawingSession ds, Rect r, float s, MediaSource m, float a)
+    public static void DrawExpanded(CanvasDrawingSession ds, Rect r, float s, MediaSource m, double time, float a)
     {
         float x = (float)r.X, y = (float)r.Y, w = (float)r.Width;
         using var title = new CanvasTextFormat
@@ -56,10 +56,11 @@ static class MediaView
         // Title + artist take the left half when there's a lyric; the synced line sits in the right half, beside them.
         string lyric = m.CurrentLyric;
         float textW = w - 118 * s, tw = lyric.Length > 0 ? textW * 0.5f : textW;
+        TitleScrolls = false;
         Slide(m, 28 * s, a, (dx, al, art, t, ar) =>
         {
             DrawArt(ds, art, new Rect(x + 20 * s + dx, y + 20 * s, 64 * s, 64 * s), 12 * s, art == m.Art ? al * m.ArtFadeT : al);
-            ds.DrawText(t, new Rect(x + 98 * s + dx, y + 28 * s, tw, 24 * s), White(al), title);
+            Marquee(ds, t, new Rect(x + 98 * s + dx, y + 28 * s, tw, 24 * s), White(al), title, time, s);
             ds.DrawText(ar, new Rect(x + 98 * s + dx, y + 54 * s, tw, 20 * s), White(0.65f * al), sub);
         });
         if (lyric.Length > 0)
@@ -99,6 +100,25 @@ static class MediaView
         float t = m.TransitionT, e = 1 - MathF.Pow(1 - t, 3);
         if (t < 1 && m.PrevTitle.Length > 0) draw(-e * distance, (1 - e) * a, m.PrevArt, m.PrevTitle, m.PrevArtist);
         draw((1 - e) * distance, e * a, m.Art, m.Title, m.Artist);
+    }
+
+    /// <summary>True while the expanded title is too long and scrolling, so the window keeps redrawing.</summary>
+    public static bool TitleScrolls;
+
+    /// <summary>Text that fits is drawn as is; longer text pauses 2 s, then scrolls left and loops.</summary>
+    static void Marquee(CanvasDrawingSession ds, string text, Rect box, Color c, CanvasTextFormat f, double time, float s)
+    {
+        using var layout = new CanvasTextLayout(ds, text, f, 100000, (float)box.Height);
+        float textW = (float)layout.LayoutBounds.Width;
+        if (textW <= box.Width) { ds.DrawTextLayout(layout, (float)box.X, (float)box.Y, c); return; }
+        TitleScrolls = true;
+        float gap = 48 * s, speed = 30 * s, loop = textW + gap;
+        float offset = (float)Math.Max(0, time % (2 + loop / speed) - 2) * speed;
+        using (ds.CreateLayer(1, box))
+        {
+            ds.DrawTextLayout(layout, (float)box.X - offset, (float)box.Y, c);
+            ds.DrawTextLayout(layout, (float)box.X - offset + loop, (float)box.Y, c);
+        }
     }
 
     /// <summary>0 = previous, 1 = play/pause, 2 = next, -1 = none.</summary>
