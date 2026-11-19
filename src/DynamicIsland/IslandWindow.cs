@@ -197,9 +197,7 @@ public sealed class IslandWindow : Window
 
         AppWindow.Move(new PointInt32(_monLeft, _monTop)); // move first so we read this monitor's DPI
         _dpi = Native.GetDpiForWindow(_hwnd) / 96f;
-        // Size the island for the screen, not just DPI: a 2560-wide monitor at 100% would otherwise get the smallest island
-        // (an 84 x 8 px bar). Laptops at their usual 125-200% scaling keep their size.
-        _s = MathF.Max(_dpi, _monW / 1920f);
+        _s = _dpi; // island sizes follow the display scaling only (screen-width scaling was too big on a 2560 px monitor)
         Glass.Dpi = _dpi;
         _canvas.Width = CanvasDip * _s / _dpi;
         _stripH = (int)(StripDip * _s);
