@@ -48,8 +48,9 @@ static class MediaView
 
         if (!m.HasSession)
         {
-            ds.DrawText("Nothing playing", new Rect(x + 24 * s, y + 24 * s, w - 48 * s, 26 * s), White(a), title);
-            ds.DrawText("Play something in any media app", new Rect(x + 24 * s, y + 52 * s, w - 48 * s, 22 * s), White(0.65f * a), sub);
+            var now = DateTime.Now; // nothing playing: the card is a clock
+            ds.DrawText(now.ToString("HH:mm"), new Rect(x + 24 * s, y + 24 * s, w - 48 * s, 26 * s), White(a), title);
+            ds.DrawText(now.ToString("D", System.Globalization.CultureInfo.CurrentCulture), new Rect(x + 24 * s, y + 52 * s, w - 48 * s, 22 * s), White(0.65f * a), sub);
             return;
         }
 
