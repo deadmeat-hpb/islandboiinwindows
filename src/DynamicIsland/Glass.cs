@@ -19,6 +19,8 @@ namespace DynamicIsland;
 // shortcut: ring-based refraction, no chromatic fringe; move to a custom pixel shader if it looks banded on big cards.
 static class Glass
 {
+    static CanvasRenderTarget? _blurred;
+
     static Color White(int a) => Gray(a, 255);
     static Color Gray(int a, byte v) => ColorHelper.FromArgb((byte)Math.Clamp(a, 0, 255), v, v, v);
 
@@ -50,21 +52,30 @@ static class Glass
 
     static void DrawRefraction(CanvasDrawingSession ds, ICanvasImage background, Rect rect, float r, float s, float expand)
     {
+        // Blur once into a cached bitmap; the lens rings below all sample from it instead of re-running the blur.
         float pad = 40 * s;
-        using var crop = new CropEffect
+        var src = new Rect(rect.X - pad, rect.Y - pad, rect.Width + 2 * pad, rect.Height + 2 * pad);
+        if (_blurred is null || _blurred.Device != ds.Device || _blurred.Size.Width < src.Width || _blurred.Size.Height < src.Height)
         {
-            Source = background,
-            SourceRectangle = new Rect(rect.X - pad, rect.Y - pad, rect.Width + 2 * pad, rect.Height + 2 * pad),
-        };
-        using var blur = new GaussianBlurEffect { Source = crop, BlurAmount = (1.2f + 6 * expand) * s, BorderMode = EffectBorderMode.Hard };
-        using var glass = new SaturationEffect { Source = blur, Saturation = 1.4f };
+            _blurred?.Dispose();
+            _blurred = new CanvasRenderTarget(ds.Device, (float)src.Width + 256, (float)src.Height + 128, 96); // headroom so morphing rarely reallocates
+        }
+        using (var blur = new GaussianBlurEffect { Source = background, BlurAmount = (1.2f + 6 * expand) * s, BorderMode = EffectBorderMode.Hard })
+        using (var sat = new SaturationEffect { Source = blur, Saturation = 1.4f })
+        using (var b = _blurred.CreateDrawingSession())
+        {
+            b.Clear(Colors.Transparent);
+            b.DrawImage(sat, 0, 0, src);
+        }
+        var glass = _blurred;
+        var origin = new Vector2((float)src.X, (float)src.Y);
 
         var c = new Vector2((float)(rect.X + rect.Width / 2), (float)(rect.Y + rect.Height / 2));
         float hw = (float)rect.Width / 2, hh = (float)rect.Height / 2;
 
         // Body: a touch of magnification, like thick glass.
         using (var body = RoundRect(ds, rect, r, 0))
-            DrawLens(ds, glass, body, c, hw, hh, -0.04f * MathF.Min(hw, hh));
+            DrawLens(ds, glass, origin, body, c, hw, hh, -0.04f * MathF.Min(hw, hh));
 
         // Rim: rings that bend more strongly toward the edge.
         float band = MathF.Min(12 * s, MathF.Min(hw, hh) * 0.7f);
@@ -75,18 +86,18 @@ static class Glass
             using var outer = RoundRect(ds, rect, r, band * i / rings);
             using var inner = RoundRect(ds, rect, r, band * (i + 1) / rings);
             using var ring = outer.CombineWith(inner, Matrix3x2.Identity, CanvasGeometryCombine.Exclude);
-            DrawLens(ds, glass, ring, c, hw, hh, band * 1.6f * t * t);
+            DrawLens(ds, glass, origin, ring, c, hw, hh, band * 1.6f * t * t);
         }
     }
 
     /// <summary>Draws <paramref name="src"/> inside <paramref name="clip"/>, sampling from <paramref name="d"/> px further out at the edge.</summary>
-    static void DrawLens(CanvasDrawingSession ds, ICanvasImage src, CanvasGeometry clip, Vector2 c, float hw, float hh, float d)
+    static void DrawLens(CanvasDrawingSession ds, ICanvasImage src, Vector2 origin, CanvasGeometry clip, Vector2 c, float hw, float hh, float d)
     {
         float mx = hw / MathF.Max(hw + d, 0.5f), my = hh / MathF.Max(hh + d, 0.5f);
         using var lens = new Transform2DEffect
         {
             Source = src,
-            TransformMatrix = Matrix3x2.CreateTranslation(-c) * Matrix3x2.CreateScale(mx, my) * Matrix3x2.CreateTranslation(c),
+            TransformMatrix = Matrix3x2.CreateTranslation(origin - c) * Matrix3x2.CreateScale(mx, my) * Matrix3x2.CreateTranslation(c),
             InterpolationMode = CanvasImageInterpolation.Linear,
         };
         using (ds.CreateLayer(1f, clip)) ds.DrawImage(lens);

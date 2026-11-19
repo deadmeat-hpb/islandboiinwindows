@@ -39,9 +39,9 @@ public sealed class IslandWindow : Window
     Mode _mode = Mode.Idle;
     Spring _x, _w, _h, _top;
     double _lastTick, _leftAt = -1;
-    bool _dirty = true, _pressed, _dragging;
+    bool _dirty = true, _pressed, _dragging, _wasAnimating;
     float _pressX, _grabOffset;
-    (int, int, int, int) _region;
+    (int, int, int, int) _region = (int.MaxValue, 0, 0, 0);
 
     public IslandWindow()
     {
@@ -144,14 +144,17 @@ public sealed class IslandWindow : Window
         UpdateHover(now);
         if (_capture?.TryUpdate() == true) _dirty = true;
 
-        if (!(_x.Settled && _w.Settled && _h.Settled && _top.Settled))
+        bool animating = _pressed || !(_x.Settled && _w.Settled && _h.Settled && _top.Settled);
+        if (animating)
         {
             _x.Step(dt); _w.Step(dt); _h.Step(dt); _top.Step(dt);
             _dirty = true;
         }
+        else if (_wasAnimating) _dirty = true; // one last pass to shrink the click region
+        _wasAnimating = animating;
         if (!_dirty) return;
         _dirty = false;
-        UpdateRegion();
+        UpdateRegion(animating);
         _canvas.Invalidate();
     }
 
@@ -174,12 +177,15 @@ public sealed class IslandWindow : Window
     }
 
     /// <summary>Only the island (plus a small margin) takes clicks; the rest of the strip passes them through.</summary>
-    void UpdateRegion()
+    void UpdateRegion(bool animating = false)
     {
         var (cx, top, w, h) = Shape();
+        if (animating) (w, h) = (MathF.Max(w, _w.Target * 1.2f), MathF.Max(h, _h.Target * 1.2f)); // cover the target + overshoot up front so the region grows once
         float pad = (_mode == Mode.Expanded ? 34 : 12) * _s;
         static int Snap4(float v) => (int)MathF.Round(v / 4) * 4; // fewer region updates while animating
         var region = (Math.Max(0, Snap4(cx - w / 2 - pad)), 0, Math.Min(_monW, Snap4(cx + w / 2 + pad)), Math.Min(_stripH, Snap4(top + h + pad)));
+        if (animating) // only grow while moving: resizing the region every frame makes DWM stutter
+            region = (Math.Min(region.Item1, _region.Item1), 0, Math.Max(region.Item3, _region.Item3), Math.Max(region.Item4, _region.Item4));
         if (region == _region) return;
         _region = region;
         Native.SetWindowRgn(_hwnd, Native.CreateRectRgn(region.Item1, region.Item2, region.Item3, region.Item4), true);
