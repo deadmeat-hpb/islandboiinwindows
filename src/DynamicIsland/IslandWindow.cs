@@ -4,12 +4,14 @@ using System.Runtime.InteropServices;
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.UI.Xaml;
 using Microsoft.UI;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.Graphics;
+using Windows.System.Power;
 using WinRT.Interop;
 
 namespace DynamicIsland;
@@ -35,6 +37,8 @@ public sealed class IslandWindow : Window
     IslandNotification? _note;
     double _noteUntil, _hudUntil;
     HudEvent? _hud;
+    DispatcherQueueTimer _slowTick;
+    bool _fast;
     SystemHud? _system; // field so the audio/WMI listeners aren't garbage-collected
     ScreenCapture? _capture;
 
@@ -96,8 +100,12 @@ public sealed class IslandWindow : Window
         try { _capture = new ScreenCapture(CanvasDevice.GetSharedDevice(), _monitor, _stripH + 64); } // + room for the lens pad below the island
         catch (Exception ex) { Debug.WriteLine($"Screen capture unavailable, using solid glass: {ex}"); }
 
-        CompositionTarget.Rendering += OnTick;
-        Closed += (_, _) => { CompositionTarget.Rendering -= OnTick; _capture?.Dispose(); };
+        // Battery: a slow 15 Hz tick when nothing moves; per-frame ticks only while animating (see SetFast).
+        _slowTick = DispatcherQueue.CreateTimer();
+        _slowTick.Interval = TimeSpan.FromMilliseconds(66);
+        _slowTick.Tick += (_, _) => OnTick(null, this);
+        _slowTick.Start();
+        Closed += (_, _) => { _slowTick.Stop(); SetFast(false); _capture?.Dispose(); };
     }
 
     void SetupWindow()
@@ -171,10 +179,15 @@ public sealed class IslandWindow : Window
         _lastTick = now;
 
         UpdateHover(now);
-        if (_capture?.TryUpdate() == true) _dirty = true;
-        if (_media.Playing && _mode is Mode.Compact or Mode.Expanded) _dirty = true; // waveform + progress bar move
-
         bool animating = _pressed || !(_x.Settled && _w.Settled && _h.Settled && _top.Settled);
+        SetFast(animating);
+
+        // Background refraction only refreshes at the slow tick rate when idle, and freezes in battery saver.
+        if ((animating || PowerManager.EnergySaverStatus != EnergySaverStatus.On) && _capture?.TryUpdate() == true) _dirty = true;
+        bool playing = _media.Playing && _mode is Mode.Compact or Mode.Expanded;
+        if (playing) _dirty = true; // waveform + progress bar move
+        _slowTick.Interval = TimeSpan.FromMilliseconds(playing ? 33 : 66); // waveform needs ~30 fps to look alive
+
         if (animating)
         {
             _x.Step(dt); _w.Step(dt); _h.Step(dt); _top.Step(dt);
@@ -186,6 +199,14 @@ public sealed class IslandWindow : Window
         _dirty = false;
         UpdateRegion(animating);
         _canvas.Invalidate();
+    }
+
+    void SetFast(bool on)
+    {
+        if (on == _fast) return;
+        _fast = on;
+        if (on) CompositionTarget.Rendering += OnTick;
+        else CompositionTarget.Rendering -= OnTick;
     }
 
     void UpdateHover(double now)
@@ -260,6 +281,7 @@ public sealed class IslandWindow : Window
         _grabOffset = _pressX - _x.Value;
         _w.Velocity += 250 * _s; // little squish so the press feels physical
         _root.CapturePointer(e.Pointer);
+        SetFast(true);
     }
 
     void OnMoved(object sender, PointerRoutedEventArgs e)
