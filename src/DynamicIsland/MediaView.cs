@@ -54,9 +54,21 @@ static class MediaView
         }
 
         DrawArt(ds, m.Art, new Rect(x + 20 * s, y + 20 * s, 64 * s, 64 * s), 12 * s, a);
-        ds.DrawText(m.Title, new Rect(x + 98 * s, y + 28 * s, w - 118 * s, 24 * s), White(a), title);
-        ds.DrawText(m.Artist, new Rect(x + 98 * s, y + 54 * s, w - 118 * s, 20 * s), White(0.65f * a), sub);
-        ds.DrawText(m.CurrentLyric, new Rect(x + 98 * s, y + 76 * s, w - 118 * s, 20 * s), White(0.9f * a), sub); // synced lyric, just above the progress bar
+        // Title + artist take the left half when there's a lyric; the synced line sits in the right half, beside them.
+        string lyric = m.CurrentLyric;
+        float textW = w - 118 * s, tw = lyric.Length > 0 ? textW * 0.5f : textW;
+        ds.DrawText(m.Title, new Rect(x + 98 * s, y + 28 * s, tw, 24 * s), White(a), title);
+        ds.DrawText(m.Artist, new Rect(x + 98 * s, y + 54 * s, tw, 20 * s), White(0.65f * a), sub);
+        if (lyric.Length > 0)
+        {
+            using var lyricFormat = new CanvasTextFormat
+            {
+                FontFamily = "Segoe UI Variable Text", FontSize = 13 * s, FontWeight = FontWeights.SemiBold,
+                WordWrapping = CanvasWordWrapping.Wrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Word,
+                HorizontalAlignment = CanvasHorizontalAlignment.Right, VerticalAlignment = CanvasVerticalAlignment.Center,
+            };
+            ds.DrawText(lyric, new Rect(x + 98 * s + tw + 12 * s, y + 20 * s, textW - tw - 12 * s, 64 * s), White(0.9f * a), lyricFormat); // up to 3 lines beside the art
+        }
 
         float px = x + 20 * s, pw = w - 40 * s, py = y + 100 * s;
         ds.FillRoundedRectangle(px, py, pw, 4 * s, 2 * s, 2 * s, White(0.25f * a));
