@@ -1,5 +1,6 @@
 using System.Numerics;
 using Microsoft.Graphics.Canvas;
+using Microsoft.Graphics.Canvas.Brushes;
 using Microsoft.Graphics.Canvas.Geometry;
 using Microsoft.Graphics.Canvas.Text;
 using Microsoft.UI;
@@ -102,6 +103,36 @@ static class MediaView
         Color Accent(float al) => ColorHelper.FromArgb((byte)Math.Clamp(al * 255, 0, 255), Mix(c0.R, c1.R), Mix(c0.G, c1.G), Mix(c0.B, c1.B));
         ds.FillRoundedRectangle(px, py, pw, 4 * s, 2 * s, 2 * s, White(0.25f * a)); // neutral track
         ds.FillRoundedRectangle(px, py, pw * f, 4 * s, 2 * s, 2 * s, Accent(0.95f * a));
+        float filled = pw * f;
+        if (filled > 2 * s)
+        {
+            // Light running along the bar: while playing, a faint sheen flows from the start into the playhead every ~2.5 s...
+            float band = 36 * s, cycle = 2.5f, travel = 1.6f;
+            float k = (float)(time % cycle) / travel;
+            if (m.Playing && Scrub is null && k < 1 && filled > 6 * s)
+            {
+                float cx = px - band + (filled + band) * k;
+                using var sheen = new CanvasLinearGradientBrush(ds,
+                [
+                    new CanvasGradientStop { Position = 0f, Color = White(0) },
+                    new CanvasGradientStop { Position = 0.5f, Color = White(0.45f * a) },
+                    new CanvasGradientStop { Position = 1f, Color = White(0) },
+                ]) { StartPoint = new Vector2(cx, 0), EndPoint = new Vector2(cx + band, 0) };
+                using var clip = CanvasGeometry.CreateRoundedRectangle(ds, px, py, filled, 4 * s, 2 * s, 2 * s);
+                ds.FillGeometry(clip, sheen);
+            }
+            // ...into a small light head riding the playhead: near-white core, album-colour bloom a few px wide.
+            // Dimmer when paused, a touch brighter under the thumb while dragging.
+            float level = Scrub is not null ? 1.2f : m.Playing ? 0.85f + 0.15f * MathF.Sin((float)time * 2.2f) : 0.55f;
+            var head = new Vector2(px + filled, py + 2 * s);
+            using var bloom = new CanvasRadialGradientBrush(ds,
+            [
+                new CanvasGradientStop { Position = 0f, Color = White(0.9f * a * level) },
+                new CanvasGradientStop { Position = 0.3f, Color = Accent(0.55f * a * level) },
+                new CanvasGradientStop { Position = 1f, Color = Accent(0) },
+            ]) { Center = head, RadiusX = 9 * s, RadiusY = 5 * s };
+            ds.FillEllipse(head, 9 * s, 5 * s, bloom);
+        }
         if (Scrub is not null) ds.FillCircle(px + pw * f, py + 2 * s, 6 * s, Accent(a)); // thumb while scrubbing
 
         using var icons = new CanvasTextFormat
