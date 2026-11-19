@@ -83,7 +83,7 @@ public sealed class IslandWindow : Window
         _media = new MediaSource(CanvasDevice.GetSharedDevice(), DispatcherQueue);
         _media.Changed += () =>
         {
-            if (_mode == Mode.Expanded) SetMode(Mode.Expanded); // card size depends on whether anything is playing
+            if (_mode is Mode.Expanded or Mode.Idle or Mode.Hover) SetMode(_mode); // card size depends on whether anything is playing; the bar shows the clock when nothing is
             double now = _clock.Elapsed.TotalSeconds;
             // Only a real start: not music already playing at launch, and not the brief pause apps make when skipping songs.
             if (_media.Playing && !_wasPlaying && now > 3 && now - _stoppedAt > 3 && !_fullscreen) FlowIn();
@@ -156,7 +156,17 @@ public sealed class IslandWindow : Window
         Native.DwmSetWindowAttribute(_hwnd, Native.DWMWA_WINDOW_CORNER_PREFERENCE, ref noRound, 4);
         Native.DwmSetWindowAttribute(_hwnd, Native.DWMWA_BORDER_COLOR, ref noBorder, 4);
         Native.SetWindowDisplayAffinity(_hwnd, Native.WDA_EXCLUDEFROMCAPTURE);
+
+        // The presenter keeps a 3 px dialog frame (WS_DLGFRAME, and WinUI puts the style back if it's removed) that DWM paints
+        // as a white bar above the island and that pushes the canvas down. Claim the whole window as client area instead.
+        _messages = new WinUIEx.Messaging.WindowMessageMonitor(_hwnd);
+        _messages.WindowMessageReceived += (_, e) =>
+        {
+            if (e.Message.MessageId == Native.WM_NCCALCSIZE && e.Message.WParam != 0) { e.Result = 0; e.Handled = true; }
+        };
+        Native.SetWindowPos(_hwnd, 0, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOZORDER | Native.SWP_NOACTIVATE | Native.SWP_FRAMECHANGED);
     }
+    WinUIEx.Messaging.WindowMessageMonitor? _messages; // field so the subclass isn't garbage-collected
 
     // shortcut: primary monitor only, fixed at launch; add per-monitor dragging and DPI-change handling later.
     void PlaceOnPrimaryMonitor()
@@ -177,6 +187,8 @@ public sealed class IslandWindow : Window
         _mode = mode;
         (_w.Target, _h.Target, _top.Target) = mode switch
         {
+            Mode.Idle when ShowClock => (150 * _s, 18 * _s, 0f), // a little wider and taller so the time and date fit
+            Mode.Hover when ShowClock => (170 * _s, 22 * _s, 0f),
             Mode.Idle => (84 * _s, 8 * _s, 0f),     // idle and hover melt into the screen edge (see Glass.Attached)
             Mode.Hover => (124 * _s, 16 * _s, 0f),
             Mode.Compact => (210 * _s, 32 * _s, 6 * _s), // everything else drops out of the bar as a floating pill with its full glass rim
@@ -188,6 +200,10 @@ public sealed class IslandWindow : Window
         ClampX();
         _dirty = true;
     }
+
+    /// <summary>The resting bar shows the time and date while nothing is playing.</summary>
+    bool ShowClock => !_media.Playing;
+    int _clockMinute = -1;
 
     void ClampX()
     {
@@ -232,6 +248,7 @@ public sealed class IslandWindow : Window
         if (captureDue && _capture?.TryUpdate() == true) { _dirty = true; _lastCapture = now; }
         bool playing = _media.Playing && (_mode is Mode.Compact or Mode.Expanded || _stack.Value > 2 * _s) || _mode == Mode.Expanded && MediaView.TitleScrolls;
         if (playing) _dirty = true; // waveform, progress bar and scrolling title move
+        if (ShowClock && DateTime.Now.Minute != _clockMinute) { _clockMinute = DateTime.Now.Minute; _dirty = true; } // clock: one redraw per minute change
         _slowTick.Interval = TimeSpan.FromMilliseconds(playing ? 33 : 66); // waveform needs ~30 fps to look alive
 
         if (animating)
@@ -463,6 +480,7 @@ public sealed class IslandWindow : Window
         var note = _mode == Mode.Notify ? _note : null;
         var hudEvent = _mode == Mode.Hud ? _hud : null;
         float hudAlpha = Math.Clamp((_w.Value - 180 * _s) / (60 * _s), 0, 1);
+        float clockAlpha = _mode is Mode.Idle or Mode.Hover && ShowClock ? Math.Clamp((_w.Value - 110 * _s) / (40 * _s), 0, 1) : 0; // fades in as the bar widens
         // Album glow: breathes slowly while music plays, blends to the new song's colour during the slide.
         float t = _media.TransitionT;
         var a = _media.PrevAccent; var b = _media.Accent;
@@ -476,7 +494,21 @@ public sealed class IslandWindow : Window
             if (expandedAlpha > 0) MediaView.DrawExpanded(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, expandedAlpha);
             if (note is not null && cardAlpha > 0) NotificationView.Draw(ds, rect, _s, note, cardAlpha);
             if (hudEvent is not null && hudAlpha > 0) HudView.Draw(ds, rect, _s, hudEvent, hudAlpha);
+            if (clockAlpha > 0) DrawClock(ds, rect, clockAlpha);
         });
+    }
+
+    void DrawClock(CanvasDrawingSession ds, Windows.Foundation.Rect rect, float alpha)
+    {
+        var now = DateTime.Now;
+        using var format = new Microsoft.Graphics.Canvas.Text.CanvasTextFormat
+        {
+            FontFamily = "Segoe UI Variable Text", FontSize = (_mode == Mode.Hover ? 12 : 11) * _s, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            HorizontalAlignment = Microsoft.Graphics.Canvas.Text.CanvasHorizontalAlignment.Center, VerticalAlignment = Microsoft.Graphics.Canvas.Text.CanvasVerticalAlignment.Center,
+            WordWrapping = Microsoft.Graphics.Canvas.Text.CanvasWordWrapping.NoWrap,
+        };
+        string text = $"{now:HH:mm}  ·  {now.ToString("ddd M/d", CultureInfo.CurrentCulture)}";
+        ds.DrawText(text, rect, Microsoft.UI.ColorHelper.FromArgb((byte)(210 * alpha), 255, 255, 255), format);
     }
 
     static float LoadPosition()
