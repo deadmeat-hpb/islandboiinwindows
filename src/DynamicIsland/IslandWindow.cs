@@ -1,0 +1,270 @@
+using System.Diagnostics;
+using System.Globalization;
+using System.Runtime.InteropServices;
+using Microsoft.Graphics.Canvas;
+using Microsoft.Graphics.Canvas.UI.Xaml;
+using Microsoft.UI;
+using Microsoft.UI.Windowing;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
+using Windows.Graphics;
+using WinRT.Interop;
+
+namespace DynamicIsland;
+
+/// <summary>
+/// A transparent, always-on-top strip across the top of the primary monitor.
+/// The island is drawn inside it; a window region keeps clicks outside the island passing through.
+/// </summary>
+public sealed class IslandWindow : Window
+{
+    enum Mode { Idle, Hover, Expanded }
+
+    const float StripDip = 220;
+    static readonly string PosFile = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DynamicIsland", "position.txt");
+
+    readonly nint _hwnd;
+    readonly Grid _root;
+    readonly CanvasControl _canvas;
+    readonly Stopwatch _clock = Stopwatch.StartNew();
+    ScreenCapture? _capture;
+
+    nint _monitor;
+    int _monLeft, _monTop, _monW, _stripH;
+    float _s = 1; // physical px per DIP; all island math is in physical px
+
+    Mode _mode = Mode.Idle;
+    Spring _x, _w, _h, _top;
+    double _lastTick, _leftAt = -1;
+    bool _dirty = true, _pressed, _dragging;
+    float _pressX, _grabOffset;
+    (int, int, int, int) _region;
+
+    public IslandWindow()
+    {
+        _hwnd = WindowNative.GetWindowHandle(this);
+        SystemBackdrop = new WinUIEx.TransparentTintBackdrop();
+
+        _canvas = new CanvasControl { ClearColor = Colors.Transparent };
+        _canvas.Draw += (_, e) => Draw(e.DrawingSession);
+        _root = new Grid { Background = new SolidColorBrush(Colors.Transparent), Children = { _canvas } };
+        _root.PointerPressed += OnPressed;
+        _root.PointerMoved += OnMoved;
+        _root.PointerReleased += OnReleased;
+        _root.PointerCaptureLost += (_, _) => EndPress(click: false);
+        _root.RightTapped += (_, _) => Application.Current.Exit();
+        Content = _root;
+
+        SetupWindow();
+        PlaceOnPrimaryMonitor();
+
+        _x = new Spring(LoadPosition() * _monW, 520, 34); // stiff-ish follow: lags a little behind the cursor while dragging
+        _w = new Spring(0, 300, 20);                       // bouncy shape springs
+        _h = new Spring(0, 300, 20);
+        _top = new Spring(0, 300, 22);
+        SetMode(Mode.Idle);
+        UpdateRegion();
+
+        try { _capture = new ScreenCapture(CanvasDevice.GetSharedDevice(), _monitor); }
+        catch (Exception ex) { Debug.WriteLine($"Screen capture unavailable, using solid glass: {ex}"); }
+
+        CompositionTarget.Rendering += OnTick;
+        Closed += (_, _) => { CompositionTarget.Rendering -= OnTick; _capture?.Dispose(); };
+    }
+
+    void SetupWindow()
+    {
+        var p = OverlappedPresenter.Create();
+        p.SetBorderAndTitleBar(false, false);
+        p.IsResizable = p.IsMaximizable = p.IsMinimizable = false;
+        p.IsAlwaysOnTop = true;
+        AppWindow.SetPresenter(p);
+        AppWindow.IsShownInSwitchers = false;
+
+        var ex = Native.GetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE);
+        Native.SetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE, (ex | Native.WS_EX_TOOLWINDOW | Native.WS_EX_NOACTIVATE) & ~Native.WS_EX_APPWINDOW);
+
+        int noRound = 1, noBorder = unchecked((int)0xFFFFFFFE);
+        Native.DwmSetWindowAttribute(_hwnd, Native.DWMWA_WINDOW_CORNER_PREFERENCE, ref noRound, 4);
+        Native.DwmSetWindowAttribute(_hwnd, Native.DWMWA_BORDER_COLOR, ref noBorder, 4);
+        Native.SetWindowDisplayAffinity(_hwnd, Native.WDA_EXCLUDEFROMCAPTURE);
+    }
+
+    // shortcut: primary monitor only, fixed at launch; add per-monitor dragging and DPI-change handling later.
+    void PlaceOnPrimaryMonitor()
+    {
+        _monitor = Native.MonitorFromPoint(default, 1 /* MONITOR_DEFAULTTOPRIMARY */);
+        var mi = new Native.MONITORINFO { cbSize = Marshal.SizeOf<Native.MONITORINFO>() };
+        Native.GetMonitorInfo(_monitor, ref mi);
+        (_monLeft, _monTop, _monW) = (mi.rcMonitor.Left, mi.rcMonitor.Top, mi.rcMonitor.Right - mi.rcMonitor.Left);
+
+        AppWindow.Move(new PointInt32(_monLeft, _monTop)); // move first so we read this monitor's DPI
+        _s = Native.GetDpiForWindow(_hwnd) / 96f;
+        _stripH = (int)(StripDip * _s);
+        AppWindow.MoveAndResize(new RectInt32(_monLeft, _monTop, _monW, _stripH));
+    }
+
+    void SetMode(Mode mode)
+    {
+        _mode = mode;
+        (_w.Target, _h.Target, _top.Target) = mode switch
+        {
+            Mode.Idle => (84 * _s, 6 * _s, 5 * _s),
+            Mode.Hover => (124 * _s, 14 * _s, 6 * _s),
+            _ => (380 * _s, 132 * _s, 10 * _s),
+        };
+        ClampX();
+        _dirty = true;
+    }
+
+    void ClampX()
+    {
+        float half = MathF.Max(_w.Target, _w.Value) / 2 + 8 * _s;
+        _x.Target = Math.Clamp(_x.Target, half, _monW - half);
+    }
+
+    /// <summary>The visible shape, including the liquid stretch from horizontal speed.</summary>
+    (float cx, float top, float w, float h) Shape()
+    {
+        float speed = MathF.Abs(_x.Velocity);
+        float stretch = MathF.Min(speed * 0.045f, 90 * _s);
+        float squash = 1 - MathF.Min(speed / 7000f, 0.35f);
+        return (_x.Value, _top.Value, MathF.Max(_w.Value + stretch, 1), MathF.Max(_h.Value * squash, 1));
+    }
+
+    void OnTick(object? sender, object e)
+    {
+        double now = _clock.Elapsed.TotalSeconds;
+        float dt = (float)Math.Min(now - _lastTick, 1 / 30.0);
+        _lastTick = now;
+
+        UpdateHover(now);
+        if (_capture?.TryUpdate() == true) _dirty = true;
+
+        if (!(_x.Settled && _w.Settled && _h.Settled && _top.Settled))
+        {
+            _x.Step(dt); _w.Step(dt); _h.Step(dt); _top.Step(dt);
+            _dirty = true;
+        }
+        if (!_dirty) return;
+        _dirty = false;
+        UpdateRegion();
+        _canvas.Invalidate();
+    }
+
+    void UpdateHover(double now)
+    {
+        if (_pressed) return;
+        Native.GetCursorPos(out var p);
+        float px = p.X - _monLeft, py = p.Y - _monTop;
+        var (cx, top, w, h) = Shape();
+        float m = 12 * _s;
+        bool near = px >= cx - w / 2 - m && px <= cx + w / 2 + m && py <= top + h + m && py >= -m;
+
+        if (_mode == Mode.Expanded)
+        {
+            if (near) _leftAt = -1;
+            else if (_leftAt < 0) _leftAt = now;
+            else if (now - _leftAt > 0.8) { _leftAt = -1; SetMode(Mode.Idle); }
+        }
+        else if (near != (_mode == Mode.Hover)) SetMode(near ? Mode.Hover : Mode.Idle);
+    }
+
+    /// <summary>Only the island (plus a small margin) takes clicks; the rest of the strip passes them through.</summary>
+    void UpdateRegion()
+    {
+        var (cx, top, w, h) = Shape();
+        float pad = (_mode == Mode.Expanded ? 34 : 12) * _s;
+        static int Snap4(float v) => (int)MathF.Round(v / 4) * 4; // fewer region updates while animating
+        var region = (Math.Max(0, Snap4(cx - w / 2 - pad)), 0, Math.Min(_monW, Snap4(cx + w / 2 + pad)), Math.Min(_stripH, Snap4(top + h + pad)));
+        if (region == _region) return;
+        _region = region;
+        Native.SetWindowRgn(_hwnd, Native.CreateRectRgn(region.Item1, region.Item2, region.Item3, region.Item4), true);
+    }
+
+    float PointerX(PointerRoutedEventArgs e) => (float)e.GetCurrentPoint(_root).Position.X * _s;
+
+    void OnPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(_root).Properties.IsLeftButtonPressed) return;
+        _pressed = true;
+        _dragging = false;
+        _pressX = PointerX(e);
+        _grabOffset = _pressX - _x.Value;
+        _w.Velocity += 250 * _s; // little squish so the press feels physical
+        _root.CapturePointer(e.Pointer);
+    }
+
+    void OnMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_pressed) return;
+        float x = PointerX(e);
+        if (!_dragging && MathF.Abs(x - _pressX) > 5 * _s)
+        {
+            _dragging = true;
+            if (_mode == Mode.Idle) SetMode(Mode.Hover);
+        }
+        if (!_dragging) return;
+        _x.Target = x - _grabOffset;
+        ClampX();
+        _dirty = true;
+    }
+
+    void OnReleased(object sender, PointerRoutedEventArgs e)
+    {
+        EndPress(click: true);
+        _root.ReleasePointerCapture(e.Pointer);
+    }
+
+    void EndPress(bool click)
+    {
+        if (!_pressed) return;
+        _pressed = false;
+        if (_dragging)
+        {
+            _dragging = false;
+            _x.Target += _x.Velocity * 0.06f; // carry a bit of fling momentum
+            SnapX();
+            SavePosition();
+        }
+        else if (click) SetMode(_mode == Mode.Expanded ? Mode.Hover : Mode.Expanded);
+    }
+
+    void SnapX()
+    {
+        float best = _x.Target, bestDist = 140 * _s;
+        foreach (float f in (float[])[0.15f, 0.5f, 0.85f])
+        {
+            float d = MathF.Abs(f * _monW - _x.Target);
+            if (d < bestDist) (best, bestDist) = (f * _monW, d);
+        }
+        _x.Target = best;
+        ClampX();
+    }
+
+    void Draw(CanvasDrawingSession ds)
+    {
+        var (cx, top, w, h) = Shape();
+        float expand = Math.Clamp((_h.Value - 14 * _s) / (118 * _s), 0, 1);
+        Glass.Draw(ds, _capture?.Image, cx, top, w, h, _s, expand);
+    }
+
+    static float LoadPosition()
+    {
+        try { return Math.Clamp(float.Parse(File.ReadAllText(PosFile), CultureInfo.InvariantCulture), 0, 1); }
+        catch { return 0.5f; }
+    }
+
+    void SavePosition()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(PosFile)!);
+            File.WriteAllText(PosFile, (_x.Target / _monW).ToString(CultureInfo.InvariantCulture));
+        }
+        catch (IOException) { } // losing the remembered position is harmless
+    }
+}
