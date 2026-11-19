@@ -89,7 +89,7 @@ static class MediaView
         return [new(cx - 64 * s, cy), new(cx, cy), new(cx + 64 * s, cy)];
     }
 
-    static void DrawArt(CanvasDrawingSession ds, CanvasBitmap? art, Rect dest, float radius, float a)
+    public static void DrawArt(CanvasDrawingSession ds, CanvasBitmap? art, Rect dest, float radius, float a)
     {
         if (art is null) { ds.FillRoundedRectangle(dest, radius, radius, White(0.15f * a)); return; }
         using var clip = CanvasGeometry.CreateRoundedRectangle(ds, dest, radius, radius);

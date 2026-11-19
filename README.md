@@ -9,6 +9,7 @@ A Dynamic Island for Windows, with an Apple Liquid Glass look.
 - Drag it left or right along the top edge. It stretches with speed, bounces back, snaps to left / center / right, and remembers where you left it.
 - Click: morphs into the expanded card. Click again, or move the mouse away, to collapse.
 - Music: while anything plays (Spotify, a browser, Media Player...), the island becomes a compact pill with the album art and a moving waveform. Click it for the full card: art, title, artist, progress, and previous / play-pause / next.
+- Notifications: new Windows notifications drop down from the island for 5 seconds (hover to keep one open, click to open the app). Windows asks once for notification access. To stop Windows' own pop-ups doubling up, turn off "Show notification banners" in Settings > System > Notifications.
 - Right-click: quit.
 
 ## Run

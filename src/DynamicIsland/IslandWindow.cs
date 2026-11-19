@@ -20,7 +20,7 @@ namespace DynamicIsland;
 /// </summary>
 public sealed class IslandWindow : Window
 {
-    enum Mode { Idle, Hover, Compact, Expanded }
+    enum Mode { Idle, Hover, Compact, Notify, Expanded }
 
     const float StripDip = 220;
     static readonly string PosFile = Path.Combine(
@@ -31,6 +31,9 @@ public sealed class IslandWindow : Window
     readonly CanvasControl _canvas;
     readonly Stopwatch _clock = Stopwatch.StartNew();
     readonly MediaSource _media;
+    readonly NotificationSource _notes = new(CanvasDevice.GetSharedDevice());
+    IslandNotification? _note;
+    double _noteUntil;
     ScreenCapture? _capture;
 
     nint _monitor;
@@ -70,6 +73,7 @@ public sealed class IslandWindow : Window
             _dirty = true;
         };
         _media.Start();
+        _notes.Start(DispatcherQueue);
 
         _x = new Spring(LoadPosition() * _monW, 520, 34); // stiff-ish follow: lags a little behind the cursor while dragging
         _w = new Spring(0, 300, 20);                       // bouncy shape springs
@@ -125,6 +129,7 @@ public sealed class IslandWindow : Window
             Mode.Idle => (84 * _s, 6 * _s, 5 * _s),
             Mode.Hover => (124 * _s, 14 * _s, 6 * _s),
             Mode.Compact => (210 * _s, 30 * _s, 6 * _s),
+            Mode.Notify => (360 * _s, 72 * _s, 8 * _s),
             _ when _media.HasSession => (400 * _s, 170 * _s, 10 * _s),
             _ => (340 * _s, 96 * _s, 10 * _s),
         };
@@ -186,7 +191,29 @@ public sealed class IslandWindow : Window
             else if (_leftAt < 0) _leftAt = now;
             else if (now - _leftAt > 0.8) { _leftAt = -1; SetMode(RestMode(near: false)); }
         }
+        else if (_mode == Mode.Notify)
+        {
+            if (near) _noteUntil = Math.Max(_noteUntil, now + 1); // hovering keeps it open
+            else if (now > _noteUntil) ShowNextNote(now, near);
+        }
+        else if (_notes.Pending.Count > 0) ShowNextNote(now, near);
         else if (_mode != RestMode(near)) SetMode(RestMode(near));
+    }
+
+    /// <summary>Drops the next queued notification down for 5 seconds, or returns to rest when there are none.</summary>
+    void ShowNextNote(double now, bool near)
+    {
+        if (_notes.Pending.TryDequeue(out var next))
+        {
+            (_note, _noteUntil) = (next, now + 5);
+            SetMode(Mode.Notify);
+            _w.Velocity += 600 * _s; // arrival bounce
+        }
+        else
+        {
+            _note = null;
+            SetMode(RestMode(near));
+        }
     }
 
     /// <summary>What the island shows when not expanded: compact player while music plays, else the bar (swollen on hover).</summary>
@@ -197,7 +224,7 @@ public sealed class IslandWindow : Window
     {
         var (cx, top, w, h) = Shape();
         if (animating) (w, h) = (MathF.Max(w, _w.Target * 1.2f), MathF.Max(h, _h.Target * 1.2f)); // cover the target + overshoot up front so the region grows once
-        float pad = (_mode == Mode.Expanded ? 34 : 12) * _s;
+        float pad = (_mode is Mode.Expanded or Mode.Notify ? 34 : 12) * _s;
         static int Snap4(float v) => (int)MathF.Round(v / 4) * 4; // fewer region updates while animating
         var region = (Math.Max(0, Snap4(cx - w / 2 - pad)), 0, Math.Min(_monW, Snap4(cx + w / 2 + pad)), Math.Min(_stripH, Snap4(top + h + pad)));
         if (animating) // only grow while moving: resizing the region every frame makes DWM stutter
@@ -259,6 +286,12 @@ public sealed class IslandWindow : Window
 
     void OnClick()
     {
+        if (_mode == Mode.Notify && _note is not null)
+        {
+            NotificationSource.Open(_note);
+            _noteUntil = 0; // closes on the next tick
+            return;
+        }
         if (_mode != Mode.Expanded) { SetMode(Mode.Expanded); return; }
         if (_media.HasSession)
         {
@@ -290,11 +323,14 @@ public sealed class IslandWindow : Window
         var (cx, top, w, h) = Shape();
         float expand = Math.Clamp((_h.Value - 14 * _s) / (118 * _s), 0, 1);
         float compactAlpha = _mode == Mode.Compact ? Math.Clamp((_w.Value - 160 * _s) / (50 * _s), 0, 1) : 0;
-        float expandedAlpha = _mode == Mode.Expanded ? Math.Clamp((_h.Value / _h.Target - 0.75f) / 0.25f, 0, 1) : 0;
+        float cardAlpha = Math.Clamp((_h.Value / _h.Target - 0.75f) / 0.25f, 0, 1);
+        float expandedAlpha = _mode == Mode.Expanded ? cardAlpha : 0;
+        var note = _mode == Mode.Notify ? _note : null;
         Glass.Draw(ds, _capture?.Image, cx, top, w, h, _s, expand, rect =>
         {
             if (compactAlpha > 0) MediaView.DrawCompact(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, compactAlpha);
             if (expandedAlpha > 0) MediaView.DrawExpanded(ds, rect, _s, _media, expandedAlpha);
+            if (note is not null && cardAlpha > 0) NotificationView.Draw(ds, rect, _s, note, cardAlpha);
         });
     }
 
