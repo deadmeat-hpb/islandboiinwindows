@@ -148,7 +148,7 @@ public sealed class IslandWindow : Window
                     _pinned = true;
                     _holdUntil = now + 3; // the mouse is down at the taskbar: keep the pill up a moment before the idle rule takes it back
                     SetMode(Mode.Compact);
-                    _w.Velocity += 900 * _s; _h.Velocity += 500 * _s; // a bit bouncier than a click open
+                    _w.Velocity += 400 * _s; // a little liquid wobble in width only: it lands as the pill, never swelling past it
                     _artInAt = now;
                 }
                 _dirty = true;

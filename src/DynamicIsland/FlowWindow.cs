@@ -57,7 +57,16 @@ sealed class FlowWindow : Window
         Native.DwmSetWindowAttribute(_hwnd, Native.DWMWA_WINDOW_CORNER_PREFERENCE, ref noRound, 4);
         Native.DwmSetWindowAttribute(_hwnd, Native.DWMWA_BORDER_COLOR, ref noBorder, 4);
         Native.SetWindowDisplayAffinity(_hwnd, Native.WDA_EXCLUDEFROMCAPTURE); // keep it out of the island's glass
+
+        // Same as the island: the presenter keeps a 3 px dialog frame that DWM paints white around the whole overlay. All client area.
+        _messages = new WinUIEx.Messaging.WindowMessageMonitor(_hwnd);
+        _messages.WindowMessageReceived += (_, e) =>
+        {
+            if (e.Message.MessageId == Native.WM_NCCALCSIZE && e.Message.WParam != 0) { e.Result = 0; e.Handled = true; }
+        };
+        Native.SetWindowPos(_hwnd, 0, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOZORDER | Native.SWP_NOACTIVATE | Native.SWP_FRAMECHANGED);
     }
+    readonly WinUIEx.Messaging.WindowMessageMonitor _messages; // field so the subclass isn't garbage-collected
 
     /// <summary>Flies from <paramref name="from"/> to <paramref name="to"/> (screen pixels) across the given monitor.</summary>
     public void Play(RectInt32 monitor, float s, Vector2 from, Vector2 to, Color color)
