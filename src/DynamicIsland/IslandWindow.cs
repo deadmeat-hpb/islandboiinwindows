@@ -54,7 +54,7 @@ public sealed class IslandWindow : Window
     Mode _mode = Mode.Idle;
     Spring _x, _w, _h, _top;
     double _lastTick, _lastCapture;
-    bool _minimized, _reopen, _dirty = true, _pressed, _dragging, _wasAnimating;
+    bool _reopen, _dirty = true, _pressed, _dragging, _wasAnimating;
     float _pressX, _pressY, _grabOffset;
     (int, int, int, int) _region = (int.MaxValue, 0, 0, 0);
 
@@ -280,8 +280,8 @@ public sealed class IslandWindow : Window
         }
     }
 
-    /// <summary>What the island shows when not expanded: compact player while music plays, else the bar (swollen on hover).</summary>
-    Mode RestMode(bool near) => !_minimized && (_media.Playing || _pinned && _media.HasSession) ? Mode.Compact : near ? Mode.Hover : Mode.Idle;
+    /// <summary>What the island shows when not expanded: the pill after a click until the mouse leaves, else the slim bar (swollen on hover).</summary>
+    Mode RestMode(bool near) => _pinned && _media.HasSession ? Mode.Compact : near ? Mode.Hover : Mode.Idle; // the pill only shows after a click; otherwise the slim bar, even while music plays
 
     /// <summary>Right click steps back one stage: card → pill → bar. Notices and pop-ups just close.</summary>
     void OnRightClick()
@@ -291,7 +291,7 @@ public sealed class IslandWindow : Window
             case Mode.Expanded: _pinned = true; SetMode(RestMode(near: true)); break;
             case Mode.Notify: _noteUntil = 0; break;
             case Mode.Hud: _hudUntil = 0; break;
-            default: _minimized = true; _pinned = false; SetMode(RestMode(near: true)); break;
+            default: _pinned = false; SetMode(RestMode(near: true)); break;
         }
     }
 
@@ -363,7 +363,6 @@ public sealed class IslandWindow : Window
 
     void OnClick()
     {
-        _minimized = false;
         if (_mode == Mode.Notify && _note is not null)
         {
             NotificationSource.Open(_note);
