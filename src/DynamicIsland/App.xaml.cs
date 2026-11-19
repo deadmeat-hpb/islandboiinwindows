@@ -11,6 +11,7 @@ public partial class App : Application
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         Spring.SelfCheck();
+        MediaSource.SelfCheck();
         _window = new IslandWindow();
         _window.Activate();
     }

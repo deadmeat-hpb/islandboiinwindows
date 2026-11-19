@@ -1,4 +1,7 @@
 using System.Diagnostics;
+using System.Net.Http.Json;
+using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Microsoft.Graphics.Canvas;
 using Microsoft.UI.Dispatching;
 using Windows.Media.Control;
@@ -23,15 +26,32 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
     public bool HasSession => _session is not null;
     public event Action? Changed;
 
+    List<(TimeSpan At, string Text)> _lyrics = [];
+    static readonly HttpClient Http = new() { DefaultRequestHeaders = { { "User-Agent", "DynamicIsland/0.1" } }, Timeout = TimeSpan.FromSeconds(8) };
+    sealed record LrcResult([property: JsonPropertyName("syncedLyrics")] string? SyncedLyrics);
+
+    /// <summary>The synced lyric line for the current position, or "" when there are none.</summary>
+    public string CurrentLyric
+    {
+        get
+        {
+            var pos = Position;
+            string line = "";
+            foreach (var (at, text) in _lyrics) { if (at > pos) break; line = text; }
+            return line;
+        }
+    }
+
     public double Progress
     {
         get
         {
             if (_end <= TimeSpan.Zero) return 0;
-            var pos = _position + (Playing ? DateTimeOffset.Now - _positionAt : TimeSpan.Zero);
-            return Math.Clamp(pos / _end, 0, 1);
+            return Math.Clamp(Position / _end, 0, 1);
         }
     }
+
+    TimeSpan Position => _position + (Playing ? DateTimeOffset.Now - _positionAt : TimeSpan.Zero);
 
     public async void Start()
     {
@@ -109,7 +129,41 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
         if (session != _session) { art?.Dispose(); return; } // a newer session took over while we awaited
 
         Art?.Dispose();
+        bool newSong = title != Title || artist != Artist;
         (Title, Artist, Art) = (title, artist, art);
         Changed?.Invoke();
+        if (newSong) await LoadLyrics(session, title, artist);
+    }
+
+    /// <summary>Time-synced lyrics from LRCLIB (free, no key). Sends only the title and artist.</summary>
+    async Task LoadLyrics(GlobalSystemMediaTransportControlsSession? session, string title, string artist)
+    {
+        _lyrics = [];
+        if (title.Length == 0) return;
+        try
+        {
+            var url = $"https://lrclib.net/api/search?track_name={Uri.EscapeDataString(title)}&artist_name={Uri.EscapeDataString(artist)}";
+            var results = await Http.GetFromJsonAsync<LrcResult[]>(url) ?? [];
+            var lrc = results.FirstOrDefault(r => !string.IsNullOrEmpty(r.SyncedLyrics))?.SyncedLyrics;
+            if (lrc is null || session != _session || title != Title) return; // no synced lyrics, or the song changed meanwhile
+            _lyrics = ParseLrc(lrc);
+        }
+        catch (Exception ex) { Debug.WriteLine($"Lyrics unavailable: {ex.Message}"); } // offline or service down: just no lyrics
+    }
+
+    /// <summary>"[01:23.45] line" → (1:23.45, "line"), sorted by time.</summary>
+    internal static List<(TimeSpan, string)> ParseLrc(string lrc) =>
+        lrc.Split('\n')
+           .Select(l => Regex.Match(l.Trim(), @"^\[(\d+):(\d+(?:\.\d+)?)\](.*)$"))
+           .Where(m => m.Success)
+           .Select(m => (TimeSpan.FromMinutes(int.Parse(m.Groups[1].Value)) + TimeSpan.FromSeconds(double.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture)), m.Groups[3].Value.Trim()))
+           .OrderBy(x => x.Item1)
+           .ToList();
+
+    [Conditional("DEBUG")]
+    public static void SelfCheck()
+    {
+        var l = ParseLrc("[ti:x]\n[00:01.50] one\n[01:02.00]two\n");
+        Debug.Assert(l.Count == 2 && l[0].Item1 == TimeSpan.FromSeconds(1.5) && l[1].Item2 == "two", "LRC parsing");
     }
 }
