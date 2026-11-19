@@ -55,7 +55,7 @@ public sealed class IslandWindow : Window
     float _s = 1; // physical px per DIP; all island math is in physical px
 
     Mode _mode = Mode.Idle;
-    Spring _x, _w, _h, _top;
+    Spring _x, _w, _h, _top, _stack; // _stack: top edge of the media pill parked under a notification (0 = tucked away)
     double _lastTick, _lastCapture;
     bool _reopen, _dirty = true, _pressed, _dragging, _wasAnimating;
     float _pressX, _pressY, _grabOffset;
@@ -105,6 +105,7 @@ public sealed class IslandWindow : Window
         _w = new Spring(0, 380, 36);                       // same near-critical damping as height: a bouncing width reads as wobble
         _h = new Spring(0, 380, 36);                       // height barely overshoots: a bouncing bottom edge clips the card's buttons
         _top = new Spring(0, 380, 36);
+        _stack = new Spring(0, 380, 36);
         SetMode(Mode.Idle);
         UpdateRegion();
 
@@ -222,20 +223,22 @@ public sealed class IslandWindow : Window
         if ((Native.GetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE) & Native.WS_EX_TOPMOST) == 0) // the shell can drop us out of the topmost band; then clicks hit the window below
             Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
         UpdateHover(now);
-        bool animating = _pressed || now - _pulseAt < 0.7 || _media.TransitionT < 1 || _media.ArtFadeT < 1 || !(_x.Settled && _w.Settled && _h.Settled && _top.Settled);
+        // Stacking: while a notification or notice is up, the playing media drops below it as its own pill, then pushes back up.
+        _stack.Target = _media.Playing && _mode is Mode.Notify or Mode.Hud ? _h.Target + 8 * _s : 0;
+        bool animating = !_stack.Settled || _pressed || now - _pulseAt < 0.7 || _media.TransitionT < 1 || _media.ArtFadeT < 1 || !(_x.Settled && _w.Settled && _h.Settled && _top.Settled);
         SetFast(animating);
 
         // Background refraction only refreshes at the slow tick rate when idle, and freezes in battery saver.
         // Each background refresh costs a full redraw; the idle bar is thin, so 4 Hz is enough there.
         bool captureDue = animating || (_mode != Mode.Idle || now - _lastCapture > 0.25) && PowerManager.EnergySaverStatus != EnergySaverStatus.On;
         if (captureDue && _capture?.TryUpdate() == true) { _dirty = true; _lastCapture = now; }
-        bool playing = (_media.Playing || _mode == Mode.Expanded && MediaView.TitleScrolls) && _mode is Mode.Compact or Mode.Expanded;
+        bool playing = _media.Playing && (_mode is Mode.Compact or Mode.Expanded || _stack.Value > 2 * _s) || _mode == Mode.Expanded && MediaView.TitleScrolls;
         if (playing) _dirty = true; // waveform, progress bar and scrolling title move
         _slowTick.Interval = TimeSpan.FromMilliseconds(playing ? 33 : 66); // waveform needs ~30 fps to look alive
 
         if (animating)
         {
-            _x.Step(dt); _w.Step(dt); _h.Step(dt); _top.Step(dt);
+            _x.Step(dt); _w.Step(dt); _h.Step(dt); _top.Step(dt); _stack.Step(dt);
             _dirty = true;
         }
         else if (_wasAnimating) _dirty = true; // one last pass to shrink the click region
@@ -324,7 +327,8 @@ public sealed class IslandWindow : Window
         if (animating) (w, h) = (MathF.Max(w, _w.Target * 1.2f), MathF.Max(h, _h.Target * 1.2f)); // cover the target + overshoot up front so the region grows once
         float pad = (_mode is Mode.Expanded or Mode.Notify ? 34 : _mode == Mode.Compact ? 26 : 12) * _s; // compact leaves room for the album glow
         static int Snap4(float v) => (int)MathF.Round(v / 4) * 4; // fewer region updates while animating
-        var region = (Math.Max(0, Snap4(cx - w / 2 - pad)), 0, Math.Min(_monW, Snap4(cx + w / 2 + pad)), Math.Min(_stripH, Snap4(top + h + pad)));
+        float bottom = MathF.Max(top + h, MathF.Max(_stack.Value, _stack.Target) + PillH); // include the stacked media pill
+        var region = (Math.Max(0, Snap4(cx - MathF.Max(w, PillW) / 2 - pad)), 0, Math.Min(_monW, Snap4(cx + MathF.Max(w, PillW) / 2 + pad)), Math.Min(_stripH, Snap4(bottom + pad)));
         if (animating) // only grow while moving: resizing the region every frame makes DWM stutter
             region = (Math.Min(region.Item1, _region.Item1), 0, Math.Max(region.Item3, _region.Item3), Math.Max(region.Item4, _region.Item4));
         if (region == _region) return;
@@ -385,6 +389,7 @@ public sealed class IslandWindow : Window
 
     void OnClick()
     {
+        if (_stack.Value > 2 * _s && _pressY > _stack.Value) { _media.OpenApp(); return; } // the stacked media pill
         if (_mode == Mode.Notify && _note is not null)
         {
             NotificationSource.Open(_note);
@@ -440,9 +445,18 @@ public sealed class IslandWindow : Window
         ClampX();
     }
 
+    float PillW => 210 * _s;
+    float PillH => 32 * _s;
+
     void Draw(CanvasDrawingSession ds)
     {
         var (cx, top, w, h) = Shape();
+        if (_stack.Value > 2 * _s) // stacked media pill, drawn first so the notification covers it as it tucks back up
+        {
+            float pillAlpha = Math.Clamp(_stack.Value / (24 * _s), 0, 1);
+            Glass.Draw(ds, _capture?.Image, _canvasLeftPx, cx, _stack.Value, PillW, PillH, _s, 0, _media.Accent, _media.Playing ? 1 : 0, 0,
+                rect => MediaView.DrawCompact(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, pillAlpha));
+        }
         float expand = Math.Clamp((_h.Value - 14 * _s) / (118 * _s), 0, 1);
         float compactAlpha = _mode == Mode.Compact ? Math.Clamp((_w.Value - 160 * _s) / (50 * _s), 0, 1) : 0;
         float cardAlpha = Math.Clamp((_h.Value / _h.Target - 0.75f) / 0.25f, 0, 1);
