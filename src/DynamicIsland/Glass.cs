@@ -38,7 +38,7 @@ static class Glass
         ds.FillGeometry(shape, Gray((int)(16 + 70 * expand), 12)); // light tint, darker when expanded for legible text
         if (glowStrength > 0) // light from the album art spilling into the glass
         {
-            using var light = new CanvasRadialGradientBrush(ds, WithAlpha(glow, 0.35f * glowStrength), WithAlpha(glow, 0))
+            using var light = new CanvasRadialGradientBrush(ds, WithAlpha(glow, 0.10f * glowStrength), WithAlpha(glow, 0))
             {
                 Center = new Vector2((float)rect.X + 20 * s, (float)rect.Y + (float)rect.Height / 2),
                 RadiusX = (float)rect.Width * 0.7f, RadiusY = (float)rect.Height * 1.2f,
@@ -57,7 +57,7 @@ static class Glass
     {
         using var list = new CanvasCommandList(ds);
         using (var c = list.CreateDrawingSession()) c.FillGeometry(shape, Colors.White);
-        using var halo = new ShadowEffect { Source = list, BlurAmount = 10 * s, ShadowColor = WithAlpha(glow, 0.55f * strength) };
+        using var halo = new ShadowEffect { Source = list, BlurAmount = 16 * s, ShadowColor = WithAlpha(glow, 0.16f * strength) };
         ds.DrawImage(halo);
     }
 

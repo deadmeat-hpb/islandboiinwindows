@@ -70,10 +70,10 @@ static class MediaView
                 WordWrapping = CanvasWordWrapping.Wrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Word,
                 HorizontalAlignment = CanvasHorizontalAlignment.Right, VerticalAlignment = CanvasVerticalAlignment.Center,
             };
-            ds.DrawText(lyric, new Rect(x + 98 * s + tw + 12 * s, y + 20 * s, textW - tw - 12 * s, 64 * s), White(0.9f * a), lyricFormat); // up to 3 lines beside the art
+            ds.DrawText(lyric, new Rect(x + 98 * s + tw + 12 * s, y + 20 * s, textW - tw - 12 * s, 52 * s), White(0.9f * a), lyricFormat); // beside the title, above the progress bar
         }
 
-        float px = x + 20 * s, pw = w - 40 * s, py = y + 100 * s;
+        float px = x + 98 * s, pw = w - 118 * s, py = y + 80 * s; // beside the art, bottom-aligned with it
         ds.FillRoundedRectangle(px, py, pw, 4 * s, 2 * s, 2 * s, White(0.25f * a));
         ds.FillRoundedRectangle(px, py, pw * (float)m.Progress, 4 * s, 2 * s, 2 * s, White(0.9f * a));
 
@@ -112,7 +112,7 @@ static class MediaView
 
     static Vector2[] ButtonCenters(Rect r, float s)
     {
-        float cx = (float)(r.X + r.Width / 2), cy = (float)r.Y + 138 * s;
+        float cx = (float)(r.X + r.Width / 2), cy = (float)r.Y + 118 * s;
         return [new(cx - 64 * s, cy), new(cx, cy), new(cx + 64 * s, cy)];
     }
 

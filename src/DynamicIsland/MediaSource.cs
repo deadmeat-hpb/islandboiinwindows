@@ -184,8 +184,9 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
             float score = max <= 0 ? 0 : (max - min) / max * max; // saturated and not too dark
             if (score > bestScore) (best, bestScore) = (c, score);
         }
-        float boost = 255f / Math.Max((int)Math.Max(best.R, Math.Max(best.G, best.B)), 1);
-        return Microsoft.UI.ColorHelper.FromArgb(255, (byte)Math.Min(255, best.R * boost), (byte)Math.Min(255, best.G * boost), (byte)Math.Min(255, best.B * boost));
+        // Mix 40% toward light grey so the glow stays a tint, not a neon.
+        static byte Soft(byte v) => (byte)(v * 0.6f + 200 * 0.4f);
+        return Microsoft.UI.ColorHelper.FromArgb(255, Soft(best.R), Soft(best.G), Soft(best.B));
     }
 
     /// <summary>Time-synced lyrics from LRCLIB (free, no key). Sends only the title and artist.</summary>
