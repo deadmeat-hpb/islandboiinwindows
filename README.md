@@ -2,12 +2,13 @@
 
 A Dynamic Island for Windows, with an Apple Liquid Glass look.
 
-## Glass demo (current)
+## What it does
 
 - Idle: a slim glass bar at the top of the screen. Clicks pass through around it.
 - Hover: it swells so it's easy to grab.
 - Drag it left or right along the top edge. It stretches with speed, bounces back, snaps to left / center / right, and remembers where you left it.
 - Click: morphs into the expanded card. Click again, or move the mouse away, to collapse.
+- Music: while anything plays (Spotify, a browser, Media Player...), the island becomes a compact pill with the album art and a moving waveform. Click it for the full card: art, title, artist, progress, and previous / play-pause / next.
 - Right-click: quit.
 
 ## Run

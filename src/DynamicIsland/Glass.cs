@@ -3,9 +3,7 @@ using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Brushes;
 using Microsoft.Graphics.Canvas.Effects;
 using Microsoft.Graphics.Canvas.Geometry;
-using Microsoft.Graphics.Canvas.Text;
 using Microsoft.UI;
-using Microsoft.UI.Text;
 using Windows.Foundation;
 using Windows.UI;
 
@@ -24,7 +22,7 @@ static class Glass
     static Color White(int a) => Gray(a, 255);
     static Color Gray(int a, byte v) => ColorHelper.FromArgb((byte)Math.Clamp(a, 0, 255), v, v, v);
 
-    public static void Draw(CanvasDrawingSession ds, ICanvasImage? background, float cx, float top, float w, float h, float s, float expand)
+    public static void Draw(CanvasDrawingSession ds, ICanvasImage? background, float cx, float top, float w, float h, float s, float expand, Action<Rect>? content)
     {
         ds.Transform = Matrix3x2.CreateScale(1f / s); // draw in physical pixels
         var rect = new Rect(cx - w / 2, top, w, h);
@@ -37,9 +35,9 @@ static class Glass
         else ds.FillGeometry(shape, Gray(200, 22));
 
         ds.FillGeometry(shape, Gray((int)(16 + 70 * expand), 12)); // light tint, darker when expanded for legible text
+        if (content is not null)
+            using (ds.CreateLayer(1f, shape)) content(rect);
         DrawRim(ds, shape, rect, r, s);
-
-        if (expand > 0.7f) DrawContent(ds, shape, rect, s, (expand - 0.7f) / 0.3f);
     }
 
     static void DrawShadow(CanvasDrawingSession ds, CanvasGeometry shape, float s, float expand)
@@ -119,18 +117,6 @@ static class Glass
         ds.DrawGeometry(shape, brush, 1.1f * s);
         using var inner = RoundRect(ds, rect, r, 1.5f * s);
         ds.DrawGeometry(inner, White(28), 1f * s);
-    }
-
-    static void DrawContent(CanvasDrawingSession ds, CanvasGeometry shape, Rect rect, float s, float alpha)
-    {
-        using var title = new CanvasTextFormat { FontFamily = "Segoe UI Variable Display", FontSize = 20 * s, FontWeight = FontWeights.SemiBold };
-        using var body = new CanvasTextFormat { FontFamily = "Segoe UI Variable Text", FontSize = 13 * s };
-        float x = (float)rect.X + 24 * s, y = (float)rect.Y + 22 * s + (1 - alpha) * 8 * s;
-        using (ds.CreateLayer(alpha, shape))
-        {
-            ds.DrawText("Liquid Glass", x, y, White(255), title);
-            ds.DrawText("Drag to move  ·  Click to collapse  ·  Right-click to quit", x, y + 34 * s, White(190), body);
-        }
     }
 
     static CanvasGeometry RoundRect(ICanvasResourceCreator rc, Rect rect, float r, float inset)

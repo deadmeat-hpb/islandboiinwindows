@@ -20,7 +20,7 @@ namespace DynamicIsland;
 /// </summary>
 public sealed class IslandWindow : Window
 {
-    enum Mode { Idle, Hover, Expanded }
+    enum Mode { Idle, Hover, Compact, Expanded }
 
     const float StripDip = 220;
     static readonly string PosFile = Path.Combine(
@@ -30,6 +30,7 @@ public sealed class IslandWindow : Window
     readonly Grid _root;
     readonly CanvasControl _canvas;
     readonly Stopwatch _clock = Stopwatch.StartNew();
+    readonly MediaSource _media;
     ScreenCapture? _capture;
 
     nint _monitor;
@@ -40,7 +41,7 @@ public sealed class IslandWindow : Window
     Spring _x, _w, _h, _top;
     double _lastTick, _leftAt = -1;
     bool _dirty = true, _pressed, _dragging, _wasAnimating;
-    float _pressX, _grabOffset;
+    float _pressX, _pressY, _grabOffset;
     (int, int, int, int) _region = (int.MaxValue, 0, 0, 0);
 
     public IslandWindow()
@@ -60,6 +61,14 @@ public sealed class IslandWindow : Window
 
         SetupWindow();
         PlaceOnPrimaryMonitor();
+
+        _media = new MediaSource(CanvasDevice.GetSharedDevice(), DispatcherQueue);
+        _media.Changed += () =>
+        {
+            if (_mode == Mode.Expanded) SetMode(Mode.Expanded); // card size depends on whether anything is playing
+            _dirty = true;
+        };
+        _media.Start();
 
         _x = new Spring(LoadPosition() * _monW, 520, 34); // stiff-ish follow: lags a little behind the cursor while dragging
         _w = new Spring(0, 300, 20);                       // bouncy shape springs
@@ -114,7 +123,9 @@ public sealed class IslandWindow : Window
         {
             Mode.Idle => (84 * _s, 6 * _s, 5 * _s),
             Mode.Hover => (124 * _s, 14 * _s, 6 * _s),
-            _ => (380 * _s, 132 * _s, 10 * _s),
+            Mode.Compact => (210 * _s, 30 * _s, 6 * _s),
+            _ when _media.HasSession => (400 * _s, 170 * _s, 10 * _s),
+            _ => (340 * _s, 96 * _s, 10 * _s),
         };
         ClampX();
         _dirty = true;
@@ -143,6 +154,7 @@ public sealed class IslandWindow : Window
 
         UpdateHover(now);
         if (_capture?.TryUpdate() == true) _dirty = true;
+        if (_media.Playing && _mode is Mode.Compact or Mode.Expanded) _dirty = true; // waveform + progress bar move
 
         bool animating = _pressed || !(_x.Settled && _w.Settled && _h.Settled && _top.Settled);
         if (animating)
@@ -171,10 +183,13 @@ public sealed class IslandWindow : Window
         {
             if (near) _leftAt = -1;
             else if (_leftAt < 0) _leftAt = now;
-            else if (now - _leftAt > 0.8) { _leftAt = -1; SetMode(Mode.Idle); }
+            else if (now - _leftAt > 0.8) { _leftAt = -1; SetMode(RestMode(near: false)); }
         }
-        else if (near != (_mode == Mode.Hover)) SetMode(near ? Mode.Hover : Mode.Idle);
+        else if (_mode != RestMode(near)) SetMode(RestMode(near));
     }
+
+    /// <summary>What the island shows when not expanded: compact player while music plays, else the bar (swollen on hover).</summary>
+    Mode RestMode(bool near) => _media.Playing ? Mode.Compact : near ? Mode.Hover : Mode.Idle;
 
     /// <summary>Only the island (plus a small margin) takes clicks; the rest of the strip passes them through.</summary>
     void UpdateRegion(bool animating = false)
@@ -192,6 +207,7 @@ public sealed class IslandWindow : Window
     }
 
     float PointerX(PointerRoutedEventArgs e) => (float)e.GetCurrentPoint(_root).Position.X * _s;
+    float PointerY(PointerRoutedEventArgs e) => (float)e.GetCurrentPoint(_root).Position.Y * _s;
 
     void OnPressed(object sender, PointerRoutedEventArgs e)
     {
@@ -199,6 +215,7 @@ public sealed class IslandWindow : Window
         _pressed = true;
         _dragging = false;
         _pressX = PointerX(e);
+        _pressY = PointerY(e);
         _grabOffset = _pressX - _x.Value;
         _w.Velocity += 250 * _s; // little squish so the press feels physical
         _root.CapturePointer(e.Pointer);
@@ -236,7 +253,23 @@ public sealed class IslandWindow : Window
             SnapX();
             SavePosition();
         }
-        else if (click) SetMode(_mode == Mode.Expanded ? Mode.Hover : Mode.Expanded);
+        else if (click) OnClick();
+    }
+
+    void OnClick()
+    {
+        if (_mode != Mode.Expanded) { SetMode(Mode.Expanded); return; }
+        if (_media.HasSession)
+        {
+            var (cx, top, w, h) = Shape();
+            switch (MediaView.HitButton(new Windows.Foundation.Rect(cx - w / 2, top, w, h), _s, new System.Numerics.Vector2(_pressX, _pressY)))
+            {
+                case 0: _media.Previous(); return;
+                case 1: _media.TogglePlay(); return;
+                case 2: _media.Next(); return;
+            }
+        }
+        SetMode(RestMode(near: true));
     }
 
     void SnapX()
@@ -255,7 +288,13 @@ public sealed class IslandWindow : Window
     {
         var (cx, top, w, h) = Shape();
         float expand = Math.Clamp((_h.Value - 14 * _s) / (118 * _s), 0, 1);
-        Glass.Draw(ds, _capture?.Image, cx, top, w, h, _s, expand);
+        float compactAlpha = _mode == Mode.Compact ? Math.Clamp((_w.Value - 160 * _s) / (50 * _s), 0, 1) : 0;
+        float expandedAlpha = _mode == Mode.Expanded ? Math.Clamp((_h.Value / _h.Target - 0.75f) / 0.25f, 0, 1) : 0;
+        Glass.Draw(ds, _capture?.Image, cx, top, w, h, _s, expand, rect =>
+        {
+            if (compactAlpha > 0) MediaView.DrawCompact(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, compactAlpha);
+            if (expandedAlpha > 0) MediaView.DrawExpanded(ds, rect, _s, _media, expandedAlpha);
+        });
     }
 
     static float LoadPosition()
