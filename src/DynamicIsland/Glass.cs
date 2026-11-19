@@ -22,9 +22,9 @@ static class Glass
     static Color White(int a) => Gray(a, 255);
     static Color Gray(int a, byte v) => ColorHelper.FromArgb((byte)Math.Clamp(a, 0, 255), v, v, v);
 
-    public static void Draw(CanvasDrawingSession ds, ICanvasImage? background, float cx, float top, float w, float h, float s, float expand, Action<Rect>? content)
+    public static void Draw(CanvasDrawingSession ds, ICanvasImage? background, float originX, float cx, float top, float w, float h, float s, float expand, Action<Rect>? content)
     {
-        ds.Transform = Matrix3x2.CreateScale(1f / s); // draw in physical pixels
+        ds.Transform = Matrix3x2.CreateTranslation(-originX, 0) * Matrix3x2.CreateScale(1f / s); // draw in screen pixels; originX = where the canvas sits
         var rect = new Rect(cx - w / 2, top, w, h);
         float r = MathF.Min(h / 2, 30 * s);
         using var shape = RoundRect(ds, rect, r, 0);

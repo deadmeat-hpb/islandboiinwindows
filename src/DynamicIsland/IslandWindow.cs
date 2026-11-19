@@ -24,13 +24,15 @@ public sealed class IslandWindow : Window
 {
     enum Mode { Idle, Hover, Compact, Hud, Notify, Expanded }
 
-    const float StripDip = 220;
+    const float StripDip = 220, CanvasDip = 640; // canvas is island-sized, not full-width: each redraw costs ~1/4 as much
     static readonly string PosFile = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DynamicIsland", "position.txt");
 
     readonly nint _hwnd;
     readonly Grid _root;
     readonly CanvasControl _canvas;
+    readonly TranslateTransform _shift = new();
+    float _canvasLeftPx;
     readonly Stopwatch _clock = Stopwatch.StartNew();
     readonly MediaSource _media;
     readonly NotificationSource _notes = new(CanvasDevice.GetSharedDevice());
@@ -48,7 +50,7 @@ public sealed class IslandWindow : Window
 
     Mode _mode = Mode.Idle;
     Spring _x, _w, _h, _top;
-    double _lastTick, _leftAt = -1;
+    double _lastTick, _lastCapture, _leftAt = -1;
     bool _dirty = true, _pressed, _dragging, _wasAnimating;
     float _pressX, _pressY, _grabOffset;
     (int, int, int, int) _region = (int.MaxValue, 0, 0, 0);
@@ -58,7 +60,7 @@ public sealed class IslandWindow : Window
         _hwnd = WindowNative.GetWindowHandle(this);
         SystemBackdrop = new WinUIEx.TransparentTintBackdrop();
 
-        _canvas = new CanvasControl { ClearColor = Colors.Transparent };
+        _canvas = new CanvasControl { ClearColor = Colors.Transparent, Width = CanvasDip, HorizontalAlignment = HorizontalAlignment.Left, RenderTransform = _shift };
         // Re-invalidate from Draw while animating: invalidating only from CompositionTarget.Rendering lands every other frame (30 fps on 60 Hz).
         _canvas.Draw += (_, e) => { Draw(e.DrawingSession); if (_wasAnimating) _canvas.Invalidate(); };
         _root = new Grid { Background = new SolidColorBrush(Colors.Transparent), Children = { _canvas } };
@@ -183,7 +185,9 @@ public sealed class IslandWindow : Window
         SetFast(animating);
 
         // Background refraction only refreshes at the slow tick rate when idle, and freezes in battery saver.
-        if ((animating || PowerManager.EnergySaverStatus != EnergySaverStatus.On) && _capture?.TryUpdate() == true) _dirty = true;
+        // Each background refresh costs a full redraw; the idle bar is thin, so 4 Hz is enough there.
+        bool captureDue = animating || (_mode != Mode.Idle || now - _lastCapture > 0.25) && PowerManager.EnergySaverStatus != EnergySaverStatus.On;
+        if (captureDue && _capture?.TryUpdate() == true) { _dirty = true; _lastCapture = now; }
         bool playing = _media.Playing && _mode is Mode.Compact or Mode.Expanded;
         if (playing) _dirty = true; // waveform + progress bar move
         _slowTick.Interval = TimeSpan.FromMilliseconds(playing ? 33 : 66); // waveform needs ~30 fps to look alive
@@ -197,8 +201,19 @@ public sealed class IslandWindow : Window
         _wasAnimating = animating;
         if (!_dirty) return;
         _dirty = false;
+        FollowIsland();
         UpdateRegion(animating);
         _canvas.Invalidate();
+    }
+
+    /// <summary>Moves the canvas only when the island nears its edge, so it rarely moves mid-animation.</summary>
+    void FollowIsland()
+    {
+        var (cx, _, w, _) = Shape();
+        float canvasW = CanvasDip * _s, half = w / 2 + 40 * _s;
+        if (cx - half >= _canvasLeftPx && cx + half <= _canvasLeftPx + canvasW) return;
+        _canvasLeftPx = Math.Clamp(MathF.Round(cx - canvasW / 2), 0, MathF.Max(0, _monW - canvasW));
+        _shift.X = _canvasLeftPx / _s;
     }
 
     void SetFast(bool on)
@@ -363,7 +378,7 @@ public sealed class IslandWindow : Window
         var note = _mode == Mode.Notify ? _note : null;
         var hudEvent = _mode == Mode.Hud ? _hud : null;
         float hudAlpha = Math.Clamp((_w.Value - 180 * _s) / (60 * _s), 0, 1);
-        Glass.Draw(ds, _capture?.Image, cx, top, w, h, _s, expand, rect =>
+        Glass.Draw(ds, _capture?.Image, _canvasLeftPx, cx, top, w, h, _s, expand, rect =>
         {
             if (compactAlpha > 0) MediaView.DrawCompact(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, compactAlpha);
             if (expandedAlpha > 0) MediaView.DrawExpanded(ds, rect, _s, _media, expandedAlpha);
