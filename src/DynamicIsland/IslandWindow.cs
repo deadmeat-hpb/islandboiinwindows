@@ -35,6 +35,7 @@ public sealed class IslandWindow : Window
     IslandNotification? _note;
     double _noteUntil, _hudUntil;
     HudEvent? _hud;
+    SystemHud? _system; // field so the audio/WMI listeners aren't garbage-collected
     ScreenCapture? _capture;
 
     nint _monitor;
@@ -75,7 +76,7 @@ public sealed class IslandWindow : Window
         };
         _media.Start();
         _notes.Start(DispatcherQueue);
-        var hud = new SystemHud(DispatcherQueue);
+        var hud = _system = new SystemHud(DispatcherQueue);
         hud.Changed += e =>
         {
             if (_mode is Mode.Expanded or Mode.Notify) return; // don't cover an open card or a notification
