@@ -100,6 +100,7 @@ public sealed class SettingsWindow : Window
                 page.Children.Add(Card("", "Battery and charging", "Plugging in, unplugging, low battery and energy saver.", Toggle(s => s.Battery, (s, v) => s.Battery = v)));
                 page.Children.Add(Card("", "Bluetooth", "Devices connecting, with their battery.", Toggle(s => s.Bluetooth, (s, v) => s.Bluetooth = v)));
                 page.Children.Add(Card("", "Wi-Fi", "Joining a network.", Toggle(s => s.Wifi, (s, v) => s.Wifi = v)));
+                page.Children.Add(Card("", "Clock timers", "Minimise Clock while a timer or the stopwatch runs and it keeps counting in the island.", Toggle(s => s.ClockTimers, (s, v) => s.ClockTimers = v)));
                 page.Children.Add(Section("Behaviour"));
                 page.Children.Add(Card("", "Resting island", "What the island shows when nothing is happening.",
                     Choice(["Clock and date", "Slim bar"], s => s.IdleClock ? 0 : 1, (s, i) => s.IdleClock = i == 0)));
@@ -107,7 +108,7 @@ public sealed class SettingsWindow : Window
                     Choice(["3 seconds", "5 seconds", "8 seconds"], s => s.NotificationSeconds <= 3 ? 0 : s.NotificationSeconds >= 8 ? 2 : 1, (s, i) => s.NotificationSeconds = i switch { 0 => 3, 2 => 8, _ => 5 })));
                 page.Children.Add(Card("", "Full-screen apps", "Games, videos and presentations.",
                     Choice(["Keep the slim bar", "Hide the island"], s => s.HideInFullscreen ? 1 : 0, (s, i) => s.HideInFullscreen = i == 1)));
-                page.Children.Add(Card("", "Music drop", "Light flows from the player into the island when you minimise it.", Toggle(s => s.DropAnimation, (s, v) => s.DropAnimation = v)));
+                page.Children.Add(Card("", "Drop animation", "Light flows from the music player or Clock into the island when you minimise it.", Toggle(s => s.DropAnimation, (s, v) => s.DropAnimation = v)));
                 break;
 
             case "appearance":

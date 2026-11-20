@@ -32,7 +32,7 @@ A Dynamic Island for Windows, with an Apple Liquid Glass look.
 Dynamic Island lives in the taskbar's hidden icons (the ^ arrow). Click the icon, or open the app again while it runs, to open Settings; right-click it for Settings, Hide island and Quit. Settings is a normal Windows 11 window with five pages, and every change saves at once (%LOCALAPPDATA%\DynamicIslandData\settings.json) and applies live:
 
 - **General**: start with Windows or only when opened, show or hide the island, quit.
-- **Island behaviour**: switch each island on or off (music, notifications, screenshots, volume and brightness, battery, Bluetooth, Wi-Fi); clock or slim resting bar; notification time (3, 5 or 8 s); keep the slim bar or hide in full-screen apps; the music drop animation.
+- **Island behaviour**: switch each island on or off (music, notifications, screenshots, volume and brightness, battery, Bluetooth, Wi-Fi); clock or slim resting bar; notification time (3, 5 or 8 s); keep the slim bar or hide in full-screen apps; the drop animation from the music player or Clock; Clock timers on or off.
 - **Appearance**: liquid glass or a solid dark island, size (small, default, large), 24- or 12-hour clock, date on or off, re-centre the island.
 - **Power and performance**: Quality, Balanced or Battery saver (solid island, 15 fps waveform), and pausing the glass on battery.
 - **About**: version, the crash log folder, the source.

@@ -48,7 +48,7 @@ static class MediaView
             HorizontalAlignment = CanvasHorizontalAlignment.Right, VerticalAlignment = CanvasVerticalAlignment.Center, WordWrapping = CanvasWordWrapping.NoWrap,
         };
         var box = new Rect(r.X + pad, r.Y, Math.Max(0, r.Width - 2 * pad), r.Height);
-        Fonts.DrawTabular(ds, now.ToString("HH:mm"), box, White(a), time);
+        Fonts.DrawTabular(ds, now.ToString(Settings.Current.Clock24h ? "HH:mm" : "h:mm", System.Globalization.CultureInfo.InvariantCulture), box, White(a), time);
         if (timeSize < 30) { ds.DrawText(now.ToString("ddd M/d", System.Globalization.CultureInfo.CurrentCulture), box, White(0.55f * a), date); return; }
         // The card: full date with the week number under it.
         float half = (float)box.Height / 2;

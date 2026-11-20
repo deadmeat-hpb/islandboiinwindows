@@ -51,7 +51,7 @@ public sealed class IslandWindow : Window
     int _monLeft, _monTop, _monW, _monH, _stripH;
     FlowWindow? _flow;
     double _pulseAt = -10, _reachAt = -10, _rippleAt = -10, _artInAt = -10, _holdUntil; // minimize-flow arrival animation
-    Native.WinEventProc? _minimizeProc; // field so the hook callback isn't garbage-collected
+    Native.WinEventProc? _minimizeProc, _restoreProc; // fields so the hook callbacks aren't garbage-collected
     float _s = 1; // island size scale in physical px (DPI, but at least screen width / 1920); all island math is in physical px
     float _dpi = 1; // physical px per DIP, for converting to and from XAML coordinates
 
@@ -112,14 +112,35 @@ public sealed class IslandWindow : Window
         {
             try
             {
-                if (idObject != 0 || !MediaPlaying || _fullscreen || !_visible || !Settings.Current.DropAnimation) return; // OBJID_WINDOW only
+                if (idObject != 0 || _fullscreen || !_visible) return; // OBJID_WINDOW only
                 if (_mode is not (Mode.Idle or Mode.Hover)) return; // already showing the pill or card: nothing to announce
+                // Clock with a running timer or stopwatch: it flows into the island and keeps counting there.
+                if (Settings.Current.ClockTimers && Native.WindowAppId(hwnd)?.Contains(ClockActivity.AppId, StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    if (await Task.Run(() => ClockActivity.Read(hwnd)) is not { } timer) return;
+                    if (Settings.Current.DropAnimation) FlowIn(timer);
+                    else { _timer = timer; SetMode(RestMode(near: false)); }
+                    return;
+                }
+                if (!MediaPlaying || !Settings.Current.DropAnimation) return;
                 string title = _media.Title;
                 if (await Task.Run(() => _media.Window(title)) == hwnd) FlowIn(); // same window the card's art click brings forward
             }
             catch (Exception ex) { Crash.Log("Minimize", ex); }
         };
-        Native.SetWinEventHook(Native.EVENT_SYSTEM_MINIMIZESTART, Native.EVENT_SYSTEM_MINIMIZESTART, 0, _minimizeProc, 0, 0, Native.WINEVENT_OUTOFCONTEXT);        _notes.Start(DispatcherQueue);
+        Native.SetWinEventHook(Native.EVENT_SYSTEM_MINIMIZESTART, Native.EVENT_SYSTEM_MINIMIZESTART, 0, _minimizeProc, 0, 0, Native.WINEVENT_OUTOFCONTEXT);
+        // Clock restored from the taskbar: it shows its timer again, so the island lets go of it.
+        _restoreProc = (_, _, hwnd, idObject, _, _, _) =>
+        {
+            try
+            {
+                if (idObject != 0 || _timer is null || Native.WindowAppId(hwnd)?.Contains(ClockActivity.AppId, StringComparison.OrdinalIgnoreCase) != true) return;
+                _timer = null;
+                if (_mode == Mode.Compact) SetMode(RestMode(near: false));
+            }
+            catch (Exception ex) { Crash.Log("Restore", ex); }
+        };
+        Native.SetWinEventHook(0x17 /* EVENT_SYSTEM_MINIMIZEEND */, 0x17, 0, _restoreProc, 0, 0, Native.WINEVENT_OUTOFCONTEXT);        _notes.Start(DispatcherQueue);
         var hud = _system = new SystemHud(DispatcherQueue);
         hud.Changed += e =>
         {
@@ -202,16 +223,23 @@ public sealed class IslandWindow : Window
     }
 
     /// <summary>Media just started: light flows from the app's taskbar button into the island, which glows as it lands.</summary>
-    async void FlowIn()
+    async void FlowIn(ClockActivity? timer = null)
     {
-        try { await FlowInCore(); }
+        try { await FlowInCore(timer); }
         catch (Exception ex) { Crash.Log("FlowIn", ex); } // async void: an escaping exception would kill the app
     }
 
-        async Task FlowInCore()
-    {        var (cx, top, _, h) = Shape();
+    // Clock timer or stopwatch living in the island (see ClockActivity); _flowTimer is the one still in flight.
+    ClockActivity? _timer, _flowTimer;
+    int _timerSecond = -1;
+    bool TimerOn => _timer is not null && Settings.Current.ClockTimers;
+
+    async Task FlowInCore(ClockActivity? timer)
+    {
+        _flowTimer = timer;
+        var (cx, top, _, h) = Shape();
         var to = new System.Numerics.Vector2(_monLeft + cx, _monTop + top + h / 2);
-        var from = await Task.Run(() => FlowWindow.TaskbarButton(_media.AppName())) // UI Automation into the taskbar: keep it off the UI thread
+        var from = await Task.Run(() => FlowWindow.TaskbarButton(timer is not null ? "Clock" : _media.AppName())) // UI Automation into the taskbar: keep it off the UI thread
             ?? new System.Numerics.Vector2(_monLeft + _monW / 2f, _monTop + _monH - 24 * _s);
         if (_flow is null)
         {
@@ -219,10 +247,14 @@ public sealed class IslandWindow : Window
             _flow.Nearing += () => { _reachAt = _clock.Elapsed.TotalSeconds; _dirty = true; SetFast(true); }; // the underside reaches for the drop
             _flow.Arrived += () =>
             {
-                double now = _clock.Elapsed.TotalSeconds;                if (_mode is Mode.Idle or Mode.Hover && HasMedia) // swallow the drop and swell into the pill (fullscreen was checked when it started)
+                double now = _clock.Elapsed.TotalSeconds;
+                var landing = _flowTimer;
+                _flowTimer = null;
+                if (_mode is Mode.Idle or Mode.Hover && (landing is not null || HasMedia)) // swallow the drop and swell into the pill (fullscreen was checked when it started)
                 {
                     (_pulseAt, _rippleAt) = (now, now); // only for the bar: if it opened in the meantime, no ripple
-                    _pinned = true;
+                    if (landing is not null) _timer = landing; // the timer pill stays out while it runs
+                    else _pinned = true;
                     _holdUntil = now + 3; // the mouse is down at the taskbar: keep the pill up a moment before the idle rule takes it back
                     SetMode(Mode.Compact);
                     _w.Velocity += 400 * _s; // a little liquid wobble in width only: it lands as the pill, never swelling past it
@@ -231,8 +263,7 @@ public sealed class IslandWindow : Window
                 _dirty = true;
             };
         }
-        var a = _media.Accent;
-        var color = a; // album colour (already softened), same as the pill's inner light; the drop's core is near-white
+        var color = timer?.Tint ?? _media.Accent; // album colour (already softened) or the timer's amber, same as the pill's inner light; the drop's core is near-white
         _flow.Play(new RectInt32(_monLeft, _monTop, _monW, _monH), _dpi, from, to, color);
     }
 
@@ -410,6 +441,11 @@ public sealed class IslandWindow : Window
         bool playing = MediaPlaying && (_mode is Mode.Compact or Mode.Expanded || _stack.Value > 2 * _s) || _mode == Mode.Expanded && (MediaView.TitleScrolls || MediaView.LyricsAnimating(_clock.Elapsed.TotalSeconds));
         if (playing) _dirty = true; // waveform, progress bar and scrolling title move
         if (ShowClock && DateTime.Now.Minute != _clockMinute) { _clockMinute = DateTime.Now.Minute; _dirty = true; } // clock: one redraw per minute change
+        if (_timer is not null)
+        {
+            if (_timer.Finished) { _timer = null; if (_mode == Mode.Compact) SetMode(RestMode(near: false)); } // Clock's own alarm notification takes over
+            else if ((int)_timer.Now().TotalSeconds != _timerSecond) { _timerSecond = (int)_timer.Now().TotalSeconds; _dirty = true; } // one redraw per second
+        }
         _slowTick.Interval = TimeSpan.FromMilliseconds(playing && set.Power != PowerMode.Saver ? 33 : 66); // waveform needs ~30 fps to look alive; Battery saver accepts 15
 
         if (animating)
@@ -546,7 +582,7 @@ public sealed class IslandWindow : Window
     }
 
     /// <summary>What the island shows when not expanded: the pill after a click until the mouse leaves, else the slim bar (swollen on hover).</summary>
-    Mode RestMode(bool near) => _pinned ? Mode.Compact : near ? Mode.Hover : Mode.Idle; // the pill only shows after a click; otherwise the slim bar, even while music plays
+    Mode RestMode(bool near) => _pinned || TimerOn ? Mode.Compact : near ? Mode.Hover : Mode.Idle; // the pill only shows after a click; otherwise the slim bar, even while music plays
 
     /// <summary>Right click steps back one stage: card → pill → bar. Notices and pop-ups just close.</summary>
     void OnRightClick(float y)
@@ -561,7 +597,7 @@ public sealed class IslandWindow : Window
             case Mode.Expanded: _pinned = true; SetMode(RestMode(near: true)); break;
             case Mode.Notify: _noteUntil = 0; break; // notifications and notices, pill or card: slide away (see Leave)
             case Mode.Hud: _hudUntil = 0; break;
-            default: _pinned = false; SetMode(RestMode(near: true)); break;
+            default: _pinned = false; _timer = null; SetMode(RestMode(near: true)); break; // also lets go of a Clock timer pill
         }
     }
 
@@ -736,6 +772,15 @@ public sealed class IslandWindow : Window
             return;
         }
 
+        if (_mode == Mode.Compact && TimerOn) // the timer pill: back to the Clock app, which takes the timer over again
+        {
+            try { Process.Start(new ProcessStartInfo("ms-clock:") { UseShellExecute = true }); }
+            catch (Exception ex) { Debug.WriteLine($"Couldn't open Clock: {ex.Message}"); }
+            _timer = null;
+            SetMode(RestMode(near: true));
+            return;
+        }
+
         // Click ladder: bar → pill → card → open the playing app.
         switch (_mode)
         {
@@ -818,6 +863,7 @@ public sealed class IslandWindow : Window
         {
             Mode.Notify => _note?.Accent ?? cool,
             Mode.Hud => _hud?.Tint ?? cool,
+            Mode.Compact when TimerOn => _timer!.Tint,
             _ => HasMedia ? glow : cool, // album colour, blended during the song slide
         };
         float washStrength = Math.Clamp((_h.Value - 16 * _s) / (14 * _s), 0, 1); // grows in with the pill
@@ -840,7 +886,8 @@ public sealed class IslandWindow : Window
         {
             if (compactAlpha > 0)
             {
-                if (HasMedia) MediaView.DrawCompact(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, compactAlpha);
+                if (TimerOn) _timer!.Draw(ds, rect, _s, compactAlpha);
+                else if (HasMedia) MediaView.DrawCompact(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, compactAlpha);
                 else MediaView.DrawClock(ds, rect, _s, compactAlpha, 20);
             }
             if (expandedAlpha > 0) MediaView.DrawExpanded(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, expandedAlpha);

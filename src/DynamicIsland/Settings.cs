@@ -25,6 +25,7 @@ sealed class Settings
     public bool Battery { get; set; } = true;
     public bool Bluetooth { get; set; } = true;
     public bool Wifi { get; set; } = true;
+    public bool ClockTimers { get; set; } = true;
     public bool IdleClock { get; set; } = true;
     public int NotificationSeconds { get; set; } = 5;
     public bool HideInFullscreen { get; set; }
