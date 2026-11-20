@@ -62,8 +62,19 @@ public sealed class IslandWindow : Window
     float _pressX, _pressY, _grabOffset;
     (int, int, int, int) _region = (int.MaxValue, 0, 0, 0);
 
+    public static IslandWindow? Current { get; private set; }
+    public nint Hwnd => _hwnd;
+    public WinUIEx.Messaging.WindowMessageMonitor Messages => _messages!;
+
+    // Settings-aware reads: a switched-off music island behaves as if nothing plays; the glass falls back to the solid fill.
+    bool HasMedia => Settings.Current.Music && _media.HasSession;
+    bool MediaPlaying => Settings.Current.Music && _media.Playing;
+    bool _useGlass = true, _visible = true;
+    Microsoft.Graphics.Canvas.ICanvasImage? GlassImage => _useGlass ? _capture?.Image : null;
+
     public IslandWindow()
     {
+        Current = this;
         _hwnd = WindowNative.GetWindowHandle(this);
         SystemBackdrop = new WinUIEx.TransparentTintBackdrop();
 
@@ -101,7 +112,7 @@ public sealed class IslandWindow : Window
         {
             try
             {
-                if (idObject != 0 || !_media.Playing || _fullscreen) return; // OBJID_WINDOW only
+                if (idObject != 0 || !MediaPlaying || _fullscreen || !_visible || !Settings.Current.DropAnimation) return; // OBJID_WINDOW only
                 if (_mode is not (Mode.Idle or Mode.Hover)) return; // already showing the pill or card: nothing to announce
                 string title = _media.Title;
                 if (await Task.Run(() => _media.Window(title)) == hwnd) FlowIn(); // same window the card's art click brings forward
@@ -112,10 +123,10 @@ public sealed class IslandWindow : Window
         var hud = _system = new SystemHud(DispatcherQueue);
         hud.Changed += e =>
         {
-            if (_fullscreen || _mode == Mode.Notify) return;
+            if (_fullscreen || _mode == Mode.Notify || !_visible || !Allowed(e.Kind)) return;
             if (_mode == Mode.Expanded) // the open card stacks under the notice (as a card if it's the media card) and comes back after it
             {
-                if (_media.HasSession) _stackOpen = true; else _reopen = true;
+                if (HasMedia) _stackOpen = true; else _reopen = true;
             }
             bool sameCard = _mode == Mode.Hud && _detail && _hud?.Kind == e.Kind; // the open card just shows the new value
             if (_mode == Mode.Hud) _leaving = false; // a new value while it was sliding away: it stays
@@ -143,6 +154,51 @@ public sealed class IslandWindow : Window
         _slowTick.Tick += (_, _) => OnTick(null, this);
         _slowTick.Start();
         Closed += (_, _) => { _slowTick.Stop(); SetFast(false); _capture?.Dispose(); };
+        Settings.Changed += OnSettingsChanged;
+    }
+
+    static bool Allowed(HudKind kind) => kind switch
+    {
+        HudKind.Volume or HudKind.Brightness => Settings.Current.VolumeBrightness,
+        HudKind.Power or HudKind.Saver => Settings.Current.Battery,
+        HudKind.Bluetooth => Settings.Current.Bluetooth,
+        HudKind.Wifi => Settings.Current.Wifi,
+        _ => true,
+    };
+
+    static bool Allowed(IslandNotification n) =>
+        NotificationView.KindOf(n) == NoteKind.Screenshot ? Settings.Current.Screenshots : Settings.Current.Notifications;
+
+    /// <summary>A value changed in the Settings app: resize if the size changed, then redraw with the new choices.</summary>
+    void OnSettingsChanged()
+    {
+        try
+        {
+            if (MathF.Abs(_dpi * Settings.Current.SizeScale - _s) > 0.001f)
+            {
+                PlaceOnPrimaryMonitor();
+                _capture?.Dispose();
+                _capture = null;
+                try { _capture = new ScreenCapture(CanvasDevice.GetSharedDevice(), _monitor, _stripH + 64); }
+                catch (Exception ex) { Debug.WriteLine($"Screen capture unavailable, using solid glass: {ex}"); }
+            }
+            _lastCapture = 0;
+            _clockMinute = -1;
+            _region = (int.MaxValue, 0, 0, 0);
+            SetMode(_mode);
+            UpdateRegion();
+            _dirty = true;
+        }
+        catch (Exception ex) { Crash.Log("Settings apply", ex); }
+    }
+
+    /// <summary>Back to the middle of the top edge (Settings > Appearance).</summary>
+    public void ResetPosition()
+    {
+        _x.Target = _monW / 2f;
+        ClampX();
+        SavePosition();
+        _dirty = true;
     }
 
     /// <summary>Media just started: light flows from the app's taskbar button into the island, which glows as it lands.</summary>
@@ -163,7 +219,7 @@ public sealed class IslandWindow : Window
             _flow.Nearing += () => { _reachAt = _clock.Elapsed.TotalSeconds; _dirty = true; SetFast(true); }; // the underside reaches for the drop
             _flow.Arrived += () =>
             {
-                double now = _clock.Elapsed.TotalSeconds;                if (_mode is Mode.Idle or Mode.Hover && _media.HasSession) // swallow the drop and swell into the pill (fullscreen was checked when it started)
+                double now = _clock.Elapsed.TotalSeconds;                if (_mode is Mode.Idle or Mode.Hover && HasMedia) // swallow the drop and swell into the pill (fullscreen was checked when it started)
                 {
                     (_pulseAt, _rippleAt) = (now, now); // only for the bar: if it opened in the meantime, no ripple
                     _pinned = true;
@@ -218,7 +274,7 @@ public sealed class IslandWindow : Window
 
         AppWindow.Move(new PointInt32(_monLeft, _monTop)); // move first so we read this monitor's DPI
         _dpi = Native.GetDpiForWindow(_hwnd) / 96f;
-        _s = _dpi; // island sizes follow the display scaling only (screen-width scaling was too big on a 2560 px monitor)
+        _s = _dpi * Settings.Current.SizeScale; // island sizes follow the display scaling (screen-width scaling was too big on a 2560 px monitor), times the Size setting
         Glass.Dpi = _dpi;
         _canvas.Width = CanvasDip * _s / _dpi;
         _stripH = (int)(StripDip * _s);
@@ -240,7 +296,7 @@ public sealed class IslandWindow : Window
             Mode.Hud when _detail && _hud is not null => (HudView.CardW * _s, HudView.CardH(_hud, _outputs.Count) * _s, 8 * _s),
             Mode.Notify => (360 * _s, 72 * _s, 8 * _s),
             Mode.Hud => _hud?.Text.Length > 0 ? (330 * _s, 58 * _s, 8 * _s) : (240 * _s, 32 * _s, 6 * _s), // notices (battery, Bluetooth, Wi-Fi) are pills with a badge; level bars stay slim
-            _ when _media.HasSession => (400 * _s, 150 * _s, 10 * _s),
+            _ when HasMedia => (400 * _s, 150 * _s, 10 * _s),
             _ => (340 * _s, 96 * _s, 10 * _s),
         };
         ClampX();
@@ -270,11 +326,11 @@ public sealed class IslandWindow : Window
     Windows.Foundation.Rect? MediaRect()
     {
         if (_stackOpen && _stack.Value > 2 * _s) return new(_x.Value - _stackW.Value / 2, _stack.Value, _stackW.Value, _stackH.Value);
-        return _mode == Mode.Expanded && _media.HasSession ? IslandRect() : null;
+        return _mode == Mode.Expanded && HasMedia ? IslandRect() : null;
     }
 
     /// <summary>The resting bar always shows the time and date (music shows as the bar's album-coloured light).</summary>
-    bool ShowClock => true;
+    bool ShowClock => Settings.Current.IdleClock;
     double _clockOutAt = -10; // when the bar last opened into a pill: the clock hands over to the pill's content
     int _clockMinute = -1;
 
@@ -314,11 +370,27 @@ public sealed class IslandWindow : Window
         }
         if (_fullscreen && _mode != Mode.Idle) { _pinned = false; SetMode(Mode.Idle); }
 
+        // Hidden (Settings, tray menu, or full screen with "Hide the island"): the window goes away and only this check runs, twice a second.
+        bool show = Settings.Current.ShowIsland && !(_fullscreen && Settings.Current.HideInFullscreen);
+        if (show != _visible)
+        {
+            _visible = show;
+            Native.ShowWindow(_hwnd, show ? 4 /* SW_SHOWNOACTIVATE */ : 0 /* SW_HIDE */);
+            _slowTick.Interval = TimeSpan.FromMilliseconds(show ? 66 : 500);
+            if (show) { _lastCapture = 0; _dirty = true; }
+        }
+        if (!_visible)
+        {
+            _notes.Pending.Clear(); // nothing piles up to burst out when it comes back
+            SetFast(false);
+            return;
+        }
+
         if ((Native.GetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE) & Native.WS_EX_TOPMOST) == 0) // the shell can drop us out of the topmost band; then clicks hit the window below
             Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
         if (!_fullscreen) UpdateHover(now);
         // Stacking: while a notification or notice is up, the playing media drops below it as its own pill, then pushes back up.
-        bool stacked = (_media.Playing || _stackOpen) && _mode is Mode.Notify or Mode.Hud;
+        bool stacked = (MediaPlaying || _stackOpen) && _mode is Mode.Notify or Mode.Hud;
         _stack.Target = !stacked ? 0 : _leaving ? 6 * _s : _top.Target + _h.Target + 8 * _s; // glides up into the leaving island's place
         (_stackW.Target, _stackH.Target) = _stackOpen ? (MediaCardW, MediaCardH) : (PillW, PillH);
         bool animating = _leaving || !_stack.Settled || !_stackW.Settled || !_stackH.Settled || HudView.Drag is not null || _pressed || now - _pulseAt < 0.9 || now - _clockOutAt < ClockOutTime || now - _reachAt < 0.3 || _media.TransitionT < 1 || _media.ArtFadeT < 1 || !(_x.Settled && _w.Settled && _h.Settled && _top.Settled);
@@ -328,13 +400,17 @@ public sealed class IslandWindow : Window
         // 30 Hz while the island moves, 4 Hz for an open pill or card, 1 Hz for the thin smoked idle bar; half that on battery,
         // frozen in energy saver.
         bool battery = PowerManager.PowerSupplyStatus == PowerSupplyStatus.NotPresent && PowerManager.BatteryStatus != BatteryStatus.NotPresent;
-        double captureEvery = (animating ? 1 / 30.0 : _mode is Mode.Idle or Mode.Hover ? 1.0 : 0.25) * (battery ? 2 : 1);
-        bool captureDue = now - _lastCapture >= captureEvery - 0.004 && PowerManager.EnergySaverStatus != EnergySaverStatus.On;
+        var set = Settings.Current;
+        bool glass = set.LiquidGlass && set.Power != PowerMode.Saver && !(battery && set.PauseGlassOnBattery);
+        if (glass != _useGlass) { _useGlass = glass; _lastCapture = 0; _dirty = true; }
+        double rate = set.Power == PowerMode.Quality ? 0.5 : 1; // Quality refreshes the glass twice as often
+        double captureEvery = (animating ? 1 / 30.0 : _mode is Mode.Idle or Mode.Hover ? 1.0 : 0.25) * (battery ? 2 : 1) * rate;
+        bool captureDue = _useGlass && now - _lastCapture >= captureEvery - 0.004 && PowerManager.EnergySaverStatus != EnergySaverStatus.On;
         if (captureDue && _capture?.TryUpdate() == true) { _dirty = true; _lastCapture = now; }
-        bool playing = _media.Playing && (_mode is Mode.Compact or Mode.Expanded || _stack.Value > 2 * _s) || _mode == Mode.Expanded && (MediaView.TitleScrolls || MediaView.LyricsAnimating(_clock.Elapsed.TotalSeconds));
+        bool playing = MediaPlaying && (_mode is Mode.Compact or Mode.Expanded || _stack.Value > 2 * _s) || _mode == Mode.Expanded && (MediaView.TitleScrolls || MediaView.LyricsAnimating(_clock.Elapsed.TotalSeconds));
         if (playing) _dirty = true; // waveform, progress bar and scrolling title move
         if (ShowClock && DateTime.Now.Minute != _clockMinute) { _clockMinute = DateTime.Now.Minute; _dirty = true; } // clock: one redraw per minute change
-        _slowTick.Interval = TimeSpan.FromMilliseconds(playing ? 33 : 66); // waveform needs ~30 fps to look alive
+        _slowTick.Interval = TimeSpan.FromMilliseconds(playing && set.Power != PowerMode.Saver ? 33 : 66); // waveform needs ~30 fps to look alive; Battery saver accepts 15
 
         if (animating)
         {
@@ -440,7 +516,7 @@ public sealed class IslandWindow : Window
     /// <summary>After a notice leaves: the stacked media pill that glided up becomes the island's pill for a moment, then the idle rule applies.</summary>
     Mode StackedRest(double now, bool near)
     {
-        if (_stack.Value <= 2 * _s || !_media.HasSession) return RestMode(near);
+        if (_stack.Value <= 2 * _s || !HasMedia) return RestMode(near);
         (_pinned, _holdUntil) = (true, now + 2);
         return Mode.Compact;
     }
@@ -452,10 +528,12 @@ public sealed class IslandWindow : Window
     void ShowNextNote(double now, bool near)
     {
         _detail = false;
-        if (_notes.Pending.TryDequeue(out var next))
+        IslandNotification? next = null;
+        while (_notes.Pending.TryDequeue(out var n)) if (Allowed(n)) { next = n; break; } // switched-off kinds are dropped
+        if (next is not null)
         {
             _lastFullscreenCheck = 0; // re-check now: the full-screen state may be a second old (e.g. the snip overlay just closed)
-            (_note, _noteUntil) = (next, now + (NotificationView.KindOf(next) == NoteKind.Alarm ? 30 : 5)); // a ringing alarm stays until clicked, dismissed or 30 s
+            (_note, _noteUntil) = (next, now + (NotificationView.KindOf(next) == NoteKind.Alarm ? 30 : Settings.Current.NotificationSeconds)); // a ringing alarm stays until clicked, dismissed or 30 s
             SetMode(Mode.Notify);
             _w.Velocity += 600 * _s; // arrival bounce
         }
@@ -666,7 +744,7 @@ public sealed class IslandWindow : Window
                 SetMode(Mode.Compact);
                 break;
             case Mode.Expanded:
-                if (_media.HasSession) // only the album art opens the playing app; the rest of the card ignores left clicks
+                if (HasMedia) // only the album art opens the playing app; the rest of the card ignores left clicks
                 {
                     if (!MediaView.ArtRect(IslandRect(), _s).Contains(new Windows.Foundation.Point(_pressX, _pressY))) break;
                     _media.OpenApp();
@@ -703,7 +781,7 @@ public sealed class IslandWindow : Window
             float pillAlpha = Math.Clamp(_stack.Value / (24 * _s), 0, 1);
             float sw = MathF.Max(_stackW.Value, 1), sh = MathF.Max(_stackH.Value, 1);
             float open = Math.Clamp((sh - PillH) / (MediaCardH - PillH), 0, 1); // 0 = pill, 1 = card
-            Glass.Draw(ds, _capture?.Image, _canvasLeftPx, cx, _stack.Value, sw, sh, _s, open, _media.Accent, 0, 0, rect =>
+            Glass.Draw(ds, GlassImage, _canvasLeftPx, cx, _stack.Value, sw, sh, _s, open, _media.Accent, 0, 0, rect =>
             {
                 if (open < 0.5f) MediaView.DrawCompact(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, pillAlpha * (1 - 2 * open));
                 if (open > 0.6f) MediaView.DrawExpanded(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, pillAlpha * (open - 0.6f) / 0.4f);
@@ -740,12 +818,12 @@ public sealed class IslandWindow : Window
         {
             Mode.Notify => _note?.Accent ?? cool,
             Mode.Hud => _hud?.Tint ?? cool,
-            _ => _media.HasSession ? glow : cool, // album colour, blended during the song slide
+            _ => HasMedia ? glow : cool, // album colour, blended during the song slide
         };
         float washStrength = Math.Clamp((_h.Value - 16 * _s) / (14 * _s), 0, 1); // grows in with the pill
         if (_mode is Mode.Idle or Mode.Hover) // the bar: a soft light from its lower edge so it reads on dark screens too
         {
-            wash = _media.Playing ? glow : Microsoft.UI.ColorHelper.FromArgb(255, 210, 220, 240);
+            wash = MediaPlaying ? glow : Microsoft.UI.ColorHelper.FromArgb(255, 210, 220, 240);
             washStrength = 1.6f;
         }
         float landed = MathF.Max(0, 1 - (float)(clock - _pulseAt) / 0.6f); // 1 at the flow's impact, 0 after 0.6 s
@@ -758,11 +836,11 @@ public sealed class IslandWindow : Window
         float ripple = (float)((clock - _rippleAt) / 0.7);
         MediaView.ArtIn = (float)Math.Clamp((clock - _artInAt - 0.15) / 0.35, 0, 1); // the art arrives last
         using var fading = leave > 0 ? ds.CreateLayer(1 - 0.9f * leave) : null; // fades as it tucks under the edge
-        Glass.Draw(ds, _capture?.Image, _canvasLeftPx, cx, top, w, h, _s, expand, glow, glowStrength, sag, rect =>
+        Glass.Draw(ds, GlassImage, _canvasLeftPx, cx, top, w, h, _s, expand, glow, glowStrength, sag, rect =>
         {
             if (compactAlpha > 0)
             {
-                if (_media.HasSession) MediaView.DrawCompact(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, compactAlpha);
+                if (HasMedia) MediaView.DrawCompact(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, compactAlpha);
                 else MediaView.DrawClock(ds, rect, _s, compactAlpha, 20);
             }
             if (expandedAlpha > 0) MediaView.DrawExpanded(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, expandedAlpha);
@@ -806,7 +884,9 @@ public sealed class IslandWindow : Window
             HorizontalAlignment = Microsoft.Graphics.Canvas.Text.CanvasHorizontalAlignment.Center, VerticalAlignment = Microsoft.Graphics.Canvas.Text.CanvasVerticalAlignment.Center,
             WordWrapping = Microsoft.Graphics.Canvas.Text.CanvasWordWrapping.NoWrap,
         };
-        string text = $"{now:HH:mm}  ·  {now.ToString("ddd M/d", CultureInfo.CurrentCulture)}";
+        var set = Settings.Current;
+        string time = set.Clock24h ? now.ToString("HH:mm", CultureInfo.InvariantCulture) : now.ToString("h:mm tt", CultureInfo.InvariantCulture);
+        string text = set.ShowDate ? $"{time}  ·  {now.ToString("ddd M/d", CultureInfo.CurrentCulture)}" : time;
         Fonts.DrawTabular(ds, text, rect, Microsoft.UI.ColorHelper.FromArgb((byte)(210 * alpha), 255, 255, 255), format);
     }
 

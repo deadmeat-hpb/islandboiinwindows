@@ -27,6 +27,16 @@ A Dynamic Island for Windows, with an Apple Liquid Glass look.
 - Volume (card: slider, mute, switch output device), brightness (laptop panels), charging / unplugged / battery low, energy saver on / off, Bluetooth connected and Wi-Fi connected drop down as a badge pill (battery capsule, device battery, signal bars); click it for its card with the value large and a settings button.
 - Stacking: while a notification or notice is up, the music pill sits below it. Click either one to open its card in place.
 
+## Settings
+
+Dynamic Island lives in the taskbar's hidden icons (the ^ arrow). Click the icon, or open the app again while it runs, to open Settings; right-click it for Settings, Hide island and Quit. Settings is a normal Windows 11 window with five pages, and every change saves at once (%LOCALAPPDATA%\DynamicIslandData\settings.json) and applies live:
+
+- **General**: start with Windows or only when opened, show or hide the island, quit.
+- **Island behaviour**: switch each island on or off (music, notifications, screenshots, volume and brightness, battery, Bluetooth, Wi-Fi); clock or slim resting bar; notification time (3, 5 or 8 s); keep the slim bar or hide in full-screen apps; the music drop animation.
+- **Appearance**: liquid glass or a solid dark island, size (small, default, large), 24- or 12-hour clock, date on or off, re-centre the island.
+- **Power and performance**: Quality, Balanced or Battery saver (solid island, 15 fps waveform), and pausing the glass on battery.
+- **About**: version, the crash log folder, the source.
+
 ## Run
 
 Needs Windows 10 2004+ (Windows 11 recommended) and the .NET 8 SDK or newer. Visual Studio is optional: the project builds with the dotnet CLI (`EnableMsixTooling`).
@@ -36,7 +46,7 @@ cd src/DynamicIsland
 dotnet build -c Release -p:Platform=x64 -r win-x64
 ```
 
-The app is self-contained for the Windows App SDK; run `bin\x64\Release\net8.0-windows10.0.22621.0\win-x64\DynamicIsland.exe`. It registers itself to start at sign-in and to restart after a crash. Quit it from Task Manager. On the laptop a scheduled task "DynamicIsland Restart" also relaunches it when Windows logs a crash (Application Error 1000), which covers crashes in the first minute; errors are logged to %LOCALAPPDATA%DynamicIslandDataash.log.
+The app is self-contained for the Windows App SDK; run `bin\x64\Release\net8.0-windows10.0.22621.0\win-x64\DynamicIsland.exe`. It starts at sign-in (unless switched off in Settings) and restarts after a crash. Quit it from the tray icon. On the laptop a scheduled task "DynamicIsland Restart" also relaunches it when Windows logs a crash (Application Error 1000), which covers crashes in the first minute; errors are logged to %LOCALAPPDATA%DynamicIslandDataash.log.
 
 Unsigned builds are blocked while Windows Smart App Control is on.
 
