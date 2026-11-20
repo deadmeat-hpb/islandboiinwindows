@@ -82,6 +82,8 @@ static class Preview
         HudEvent[] notices =
         [
             new("\uE945", 0.76f, "76%", "Charging", ColorHelper.FromArgb(255, 80, 220, 120), Kind: HudKind.Power),
+            new("\uEBA7", 0.68f, "68%", "On battery", ColorHelper.FromArgb(255, 200, 210, 225), Kind: HudKind.Power),
+            new("\uEBC0", 0.18f, "18%", "Energy saver on", SystemHud.SaverGreen, Kind: HudKind.Saver),
             new("\uEBA0", 0.09f, "9%", "Battery low", ColorHelper.FromArgb(255, 255, 90, 80), Kind: HudKind.Power),
             new("\uE702", 0.8f, "80%", "Galaxy Buds2 Pro", SystemHud.BluetoothBlue, Kind: HudKind.Bluetooth),
             new("\uE702", -1, "", "MX Master 3S", SystemHud.BluetoothBlue, Kind: HudKind.Bluetooth),

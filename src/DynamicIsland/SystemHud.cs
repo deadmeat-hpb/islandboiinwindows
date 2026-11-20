@@ -21,7 +21,7 @@ namespace DynamicIsland;
 /// </summary>
 sealed record HudEvent(string Glyph, float Level, string Value, string Text = "", Windows.UI.Color? Tint = null, double Seconds = 1.6, string? Settings = null, HudKind Kind = HudKind.Volume);
 
-enum HudKind { Volume, Brightness, Power, Bluetooth, Wifi }
+enum HudKind { Volume, Brightness, Power, Bluetooth, Wifi, Saver }
 
 /// <summary>An audio output the volume card can switch to.</summary>
 sealed record AudioOutput(string Id, string Name, bool IsDefault);
@@ -39,6 +39,13 @@ sealed class SystemHud(DispatcherQueue ui)
     DeviceWatcher? _bluetooth;
     readonly Dictionary<string, bool> _btConnected = [];
     int _lowAnnounced = 101;
+    PowerSupplyStatus _supply;
+    EnergySaverStatus _saver;
+    DateTime _powerChangedAt;
+    internal static readonly Windows.UI.Color SaverGreen = ColorHelper.FromArgb(255, 130, 215, 90);
+
+    /// <summary>The battery glyph for a charge level (Segoe Fluent Battery0..Battery10).</summary>
+    static string BatteryGlyph(int pct) => ((char)(0xEBA0 + Math.Clamp((pct + 5) / 10, 0, 10))).ToString();
     string? _ssid;
 
     public event Action<HudEvent>? Changed;
@@ -57,18 +64,44 @@ sealed class SystemHud(DispatcherQueue ui)
         {
             _brightness = new ManagementEventWatcher(new ManagementScope(@"root\WMI"), new EventQuery("SELECT * FROM WmiMonitorBrightnessEvent"));
             _brightness.EventArrived += (_, e) =>
+            {
+                if ((DateTime.Now - _powerChangedAt).TotalSeconds < 4) return; // Windows changes brightness on AC/battery switches: that's not the user
                 Raise(new("\uE706", Convert.ToSingle(e.NewEvent.Properties["Brightness"].Value) / 100f, "", Kind: HudKind.Brightness, Settings: "ms-settings:display"));
+            };
             _brightness.Start();
         }
         catch (Exception ex) { Debug.WriteLine($"Brightness unavailable: {ex}"); }
 
+        // Plugged in / unplugged: compare with the last state (a slow charger reports Inadequate, which used to be ignored).
+        _supply = PowerManager.PowerSupplyStatus;
         PowerManager.PowerSupplyStatusChanged += (_, _) =>
         {
-            if (PowerManager.PowerSupplyStatus != PowerSupplyStatus.Adequate) return; // only announce plugging in
+            var now = PowerManager.PowerSupplyStatus;
+            bool plugged = now != PowerSupplyStatus.NotPresent, was = _supply != PowerSupplyStatus.NotPresent;
+            _supply = now;
+            if (plugged == was || PowerManager.BatteryStatus == BatteryStatus.NotPresent) return; // desktops: no battery, nothing to say
+            _powerChangedAt = DateTime.Now;
             int pct = PowerManager.RemainingChargePercent;
-            _lowAnnounced = 101;
-            Raise(new("\uE945", pct / 100f, $"{pct}%", "Charging", Green, 2.5, "ms-settings:batterysaver", HudKind.Power));
+            if (plugged)
+            {
+                _lowAnnounced = 101;
+                Raise(new("\uE945", pct / 100f, $"{pct}%", "Charging", Green, 2.5, "ms-settings:batterysaver", HudKind.Power));
+            }
+            else Raise(new(BatteryGlyph(pct), pct / 100f, $"{pct}%", "On battery", ColorHelper.FromArgb(255, 200, 210, 225), 2.5, "ms-settings:batterysaver", HudKind.Power));
         };
+
+        // Energy saver (battery saver) switching on or off, by the user or at the threshold.
+        _saver = PowerManager.EnergySaverStatus;
+        PowerManager.EnergySaverStatusChanged += (_, _) =>
+        {
+            var now = PowerManager.EnergySaverStatus;
+            bool on = now == EnergySaverStatus.On, wasOn = _saver == EnergySaverStatus.On;
+            _saver = now;
+            if (on == wasOn) return;
+            int pct = PowerManager.RemainingChargePercent;
+            Raise(new(on ? "\uEBC0" : BatteryGlyph(pct), pct / 100f, $"{pct}%", on ? "Energy saver on" : "Energy saver off", on ? SaverGreen : ColorHelper.FromArgb(255, 200, 210, 225), 3, "ms-settings:batterysaver", HudKind.Saver));
+        };
+
         PowerManager.RemainingChargePercentChanged += (_, _) =>
         {
             int pct = PowerManager.RemainingChargePercent;
@@ -283,7 +316,7 @@ static class HudView
         using var sub = new CanvasTextFormat { FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.Normal), FontSize = 12 * s, WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character };
         using var value = new CanvasTextFormat { FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.SemiBold), FontSize = 13 * s, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = CanvasHorizontalAlignment.Right, VerticalAlignment = CanvasVerticalAlignment.Center };
 
-        if (e.Kind is HudKind.Power or HudKind.Bluetooth or HudKind.Wifi) { DrawNoticeCard(ds, r, s, e, a); return; }
+        if (e.Kind is HudKind.Power or HudKind.Saver or HudKind.Bluetooth or HudKind.Wifi) { DrawNoticeCard(ds, r, s, e, a); return; }
         var icon = Icon(r, s);
         bool muted = e.Kind == HudKind.Volume && hud?.Muted == true;
         ds.FillCircle((float)(icon.X + icon.Width / 2), (float)(icon.Y + icon.Height / 2), 18 * s, muted ? W(0.10f) : T(0.22f));
@@ -338,11 +371,13 @@ static class HudView
         string title = e.Kind switch
         {
             HudKind.Power => charging ? "Charging" : e.Text.Length > 0 ? e.Text : "On battery",
+            HudKind.Saver => PowerManager.EnergySaverStatus == EnergySaverStatus.On ? "Energy saver on" : "Energy saver off",
             _ => e.Text,
         };
         string status = e.Kind switch
         {
             HudKind.Power => PowerEstimate(charging),
+            HudKind.Saver => PowerManager.EnergySaverStatus == EnergySaverStatus.On ? "Lower brightness, less background activity" : PowerEstimate(charging),
             HudKind.Bluetooth => "Connected",
             _ => "Connected",
         };
@@ -358,6 +393,7 @@ static class HudView
         switch (e.Kind)
         {
             case HudKind.Power:
+            case HudKind.Saver:
             {
                 int pct = PowerManager.RemainingChargePercent;
                 DrawCapsule(ds, new Rect(x + pad, rowY + 12 * s, 52 * s, 22 * s), s, pct / 100f, c, charging, a);
@@ -383,7 +419,7 @@ static class HudView
                 break;
             }
         }
-        DrawButton(ds, Button(r, s), s, e.Kind switch { HudKind.Power => "Battery settings", HudKind.Bluetooth => "Bluetooth settings", _ => "Wi-Fi settings" }, a);
+        DrawButton(ds, Button(r, s), s, e.Kind switch { HudKind.Power or HudKind.Saver => "Battery settings", HudKind.Bluetooth => "Bluetooth settings", _ => "Wi-Fi settings" }, a);
     }
 
     static string Signal(float level) => level switch { >= 0.8f => "Excellent", >= 0.6f => "Strong", >= 0.4f => "Good", _ => "Weak" };
@@ -490,7 +526,7 @@ static class HudView
         float tx = x + 60 * s, gaugeW = e.Kind == HudKind.Wifi ? 30 * s : e.Level >= 0 ? 74 * s : 0;
         using var name = Text(13.5f * s, Microsoft.UI.Text.FontWeights.SemiBold);
         using var status = Text(11.5f * s, Microsoft.UI.Text.FontWeights.Normal);
-        string line = e.Kind switch { HudKind.Power => charging ? "Plugged in" : "Plug in soon", HudKind.Bluetooth => "Connected", _ => $"{Signal(e.Level)} signal" };
+        string line = e.Kind switch { HudKind.Power => charging ? "Plugged in" : e.Text == "On battery" ? "Unplugged" : "Plug in soon", HudKind.Saver => e.Text.EndsWith("on") ? "Battery lasts longer" : "Full performance", HudKind.Bluetooth => "Connected", _ => $"{Signal(e.Level)} signal" };
         ds.DrawText(e.Text, new Rect(tx, cy - 18 * s, right - tx - gaugeW - 8 * s, 20 * s), white, name);
         ds.DrawText(line, new Rect(tx, cy + 1 * s, right - tx - gaugeW - 8 * s, 18 * s), ColorHelper.FromArgb((byte)(150 * a), 255, 255, 255), status);
         if (e.Kind == HudKind.Wifi)
