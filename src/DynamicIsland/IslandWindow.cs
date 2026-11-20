@@ -212,6 +212,7 @@ public sealed class IslandWindow : Window
 
     void SetMode(Mode mode)
     {
+        if (_mode is Mode.Idle or Mode.Hover && mode is not (Mode.Idle or Mode.Hover)) _clockOutAt = _clock.Elapsed.TotalSeconds;
         _mode = mode;
         (_w.Target, _h.Target, _top.Target) = mode switch
         {
@@ -257,8 +258,9 @@ public sealed class IslandWindow : Window
         return _mode == Mode.Expanded && _media.HasSession ? IslandRect() : null;
     }
 
-    /// <summary>The resting bar shows the time and date while nothing is playing.</summary>
-    bool ShowClock => !_media.Playing;
+    /// <summary>The resting bar always shows the time and date (music shows as the bar's album-coloured light).</summary>
+    bool ShowClock => true;
+    double _clockOutAt = -10; // when the bar last opened into a pill: the clock hands over to the pill's content
     int _clockMinute = -1;
 
     void ClampX()
@@ -297,7 +299,7 @@ public sealed class IslandWindow : Window
         bool stacked = (_media.Playing || _stackOpen) && _mode is Mode.Notify or Mode.Hud;
         _stack.Target = !stacked ? 0 : _leaving ? 6 * _s : _top.Target + _h.Target + 8 * _s; // glides up into the leaving island's place
         (_stackW.Target, _stackH.Target) = _stackOpen ? (MediaCardW, MediaCardH) : (PillW, PillH);
-        bool animating = _leaving || !_stack.Settled || !_stackW.Settled || !_stackH.Settled || HudView.Drag is not null || _pressed || now - _pulseAt < 0.9 || now - _reachAt < 0.3 || _media.TransitionT < 1 || _media.ArtFadeT < 1 || !(_x.Settled && _w.Settled && _h.Settled && _top.Settled);
+        bool animating = _leaving || !_stack.Settled || !_stackW.Settled || !_stackH.Settled || HudView.Drag is not null || _pressed || now - _pulseAt < 0.9 || now - _clockOutAt < ClockOutTime || now - _reachAt < 0.3 || _media.TransitionT < 1 || _media.ArtFadeT < 1 || !(_x.Settled && _w.Settled && _h.Settled && _top.Settled);
         SetFast(animating);
 
         // Background refraction only refreshes at the slow tick rate when idle, and freezes in battery saver.
@@ -683,6 +685,11 @@ public sealed class IslandWindow : Window
         var hudEvent = _mode == Mode.Hud ? _hud : null;
         float hudAlpha = Math.Clamp((_w.Value - 180 * _s) / (60 * _s), 0, 1);
         float clockAlpha = _mode is Mode.Idle or Mode.Hover && ShowClock ? Math.Clamp((_w.Value - 110 * _s) / (40 * _s), 0, 1) : 0; // fades in as the bar widens
+        // Bar → pill hand-over: the time drops into the opening pill, growing and fading, while the pill's content rises in behind it.
+        float clockOut = (float)Math.Clamp((_clock.Elapsed.TotalSeconds - _clockOutAt) / ClockOutTime, 0, 1);
+        float handOver = _mode is Mode.Idle or Mode.Hover ? 1 : clockOut;
+        float popIn = Math.Clamp(handOver * 1.5f - 0.3f, 0, 1); // content starts once the clock is a third gone
+        compactAlpha *= popIn; hudAlpha *= popIn;
         // Album glow: breathes slowly while music plays, blends to the new song's colour during the slide.
         float t = _media.TransitionT;
         var a = _media.PrevAccent; var b = _media.Accent;
@@ -724,7 +731,7 @@ public sealed class IslandWindow : Window
             if (note is not null && cardAlpha > 0)
             {
                 if (_detail) NotificationView.DrawExpanded(ds, rect, _s, note, cardAlpha);
-                else NotificationView.Draw(ds, rect, _s, note, cardAlpha);
+                else NotificationView.Draw(ds, rect, _s, note, cardAlpha * popIn);
             }
             if (hudEvent is not null)
             {
@@ -732,6 +739,15 @@ public sealed class IslandWindow : Window
                 else if (hudAlpha > 0 && _h.Value < 40 * _s) HudView.Draw(ds, rect, _s, hudEvent, hudAlpha);
             }
             if (clockAlpha > 0) DrawClock(ds, rect, clockAlpha);
+            else if (handOver < 1) // the clock leaving into the pill
+            {
+                float e = 1 - (1 - handOver) * (1 - handOver) * (1 - handOver);
+                var c = new System.Numerics.Vector2((float)(rect.X + rect.Width / 2), (float)rect.Y + 9 * _s);
+                var old = ds.Transform;
+                ds.Transform = System.Numerics.Matrix3x2.CreateScale(1 + 0.45f * e, c) * System.Numerics.Matrix3x2.CreateTranslation(0, 10 * _s * e) * old;
+                DrawClock(ds, new Windows.Foundation.Rect(rect.X, rect.Y, rect.Width, 18 * _s), 1 - e);
+                ds.Transform = old;
+            }
             if (ripple is > 0 and < 1) // soft ring running out along the glass from where the drop hit
             {
                 float e = 1 - (1 - ripple) * (1 - ripple), rx = (float)rect.Width * 0.65f * e;
@@ -740,6 +756,8 @@ public sealed class IslandWindow : Window
             }
         }, wash, washStrength);
     }
+
+    const double ClockOutTime = 0.32;
 
     void DrawClock(CanvasDrawingSession ds, Windows.Foundation.Rect rect, float alpha)
     {

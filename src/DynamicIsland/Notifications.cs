@@ -10,7 +10,7 @@ using Windows.UI.Notifications.Management;
 
 namespace DynamicIsland;
 
-sealed record IslandNotification(string App, string Title, string Body, CanvasBitmap? Icon, string AppId, Windows.UI.Color? Accent = null, DateTime At = default, CanvasBitmap? Thumb = null);
+sealed record IslandNotification(string App, string Title, string Body, CanvasBitmap? Icon, string AppId, Windows.UI.Color? Accent = null, DateTime At = default, CanvasBitmap? Thumb = null, string? File = null);
 
 /// <summary>Picks up new Windows toast notifications. Windows asks the user for access once.</summary>
 sealed class NotificationSource(CanvasDevice device)
@@ -24,6 +24,7 @@ sealed class NotificationSource(CanvasDevice device)
 
     public async void Start(DispatcherQueue ui)
     {
+        WatchScreenshots(ui); // works without notification access
         try
         {
             _listener = UserNotificationListener.Current;
@@ -51,7 +52,7 @@ sealed class NotificationSource(CanvasDevice device)
         try
         {
             foreach (var n in await _listener.GetNotificationsAsync(NotificationKinds.Toast))
-                if (_seen.Add(n.Id)) Pending.Enqueue(await Read(n));
+                if (_seen.Add(n.Id) && await Read(n) is var note && !DuplicateShot(note)) Pending.Enqueue(note);
         }
         catch (Exception ex) { Debug.WriteLine($"Reading notifications failed: {ex}"); }
         finally { _polling = false; }
@@ -95,6 +96,65 @@ sealed class NotificationSource(CanvasDevice device)
     }
     readonly Dictionary<string, Windows.UI.Color> _accents = [];
 
+    // ---- Screenshots saved without a toast (Win+PrtScn, PrtScn with auto-save) ----
+
+    FileSystemWatcher? _shots; // field: a collected watcher stops raising events
+    DateTime _lastShot;
+
+    /// <summary>One island per capture: Snipping Tool both toasts and saves a file, whichever arrives first wins.</summary>
+    bool DuplicateShot(IslandNotification n)
+    {
+        if (NotificationView.KindOf(n) != NoteKind.Screenshot) return false;
+        if ((DateTime.Now - _lastShot).TotalSeconds < 4) return true;
+        _lastShot = DateTime.Now;
+        return false;
+    }
+
+    /// <summary>Watches Pictures\Screenshots (the known folder, so OneDrive redirection is followed). Event-driven: nothing runs until a file lands.</summary>
+    void WatchScreenshots(DispatcherQueue ui)
+    {
+        try
+        {
+            var id = new Guid("b7bede81-df94-4682-a7d8-57a52620b86f"); // FOLDERID_Screenshots
+            if (Native.SHGetKnownFolderPath(ref id, 0, 0, out nint ptr) != 0) return;
+            string dir = System.Runtime.InteropServices.Marshal.PtrToStringUni(ptr) ?? "";
+            System.Runtime.InteropServices.Marshal.FreeCoTaskMem(ptr);
+            if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+            _shots = new FileSystemWatcher(dir) { NotifyFilter = NotifyFilters.FileName, EnableRaisingEvents = true };
+            _shots.Created += async (_, e) =>
+            {
+                if (!Path.GetExtension(e.FullPath).Equals(".png", StringComparison.OrdinalIgnoreCase) && !Path.GetExtension(e.FullPath).Equals(".jpg", StringComparison.OrdinalIgnoreCase)) return;
+                await Task.Delay(1500); // let a Snipping Tool toast (polled every second) claim it first, and the file finish writing
+                ui.TryEnqueue(async () =>
+                {
+                    var note = new IslandNotification("Screenshot", "Screenshot saved", $"Saved to {Path.GetFileName(dir)}", null, "Microsoft.ScreenSketch_8wekyb3d8bbwe!App", null, DateTime.Now, await FileImage(e.FullPath), e.FullPath);
+                    if (!DuplicateShot(note)) Pending.Enqueue(note);
+                });
+            };
+        }
+        catch (Exception ex) { Debug.WriteLine($"Screenshot folder watch unavailable: {ex.Message}"); }
+    }
+
+    /// <summary>The saved capture, scaled down like the clipboard snip, or null.</summary>
+    async Task<CanvasBitmap?> FileImage(string path)
+    {
+        for (int i = 0; i < 4; i++) // the writer may still hold the file
+            try
+            {
+                var bytes = await File.ReadAllBytesAsync(path);
+                using var mem = new MemoryStream(bytes);
+                var decoder = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(mem.AsRandomAccessStream());
+                double scale = Math.Min(1, 640.0 / Math.Max(decoder.PixelWidth, decoder.PixelHeight));
+                using var pixels = await decoder.GetSoftwareBitmapAsync(Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8, Windows.Graphics.Imaging.BitmapAlphaMode.Premultiplied,
+                    new Windows.Graphics.Imaging.BitmapTransform { ScaledWidth = (uint)Math.Max(1, decoder.PixelWidth * scale), ScaledHeight = (uint)Math.Max(1, decoder.PixelHeight * scale) },
+                    Windows.Graphics.Imaging.ExifOrientationMode.IgnoreExifOrientation, Windows.Graphics.Imaging.ColorManagementMode.DoNotColorManage);
+                return CanvasBitmap.CreateFromSoftwareBitmap(device, pixels);
+            }
+            catch (IOException) { await Task.Delay(300); }
+            catch (Exception ex) { Debug.WriteLine($"Screenshot file unreadable: {ex.Message}"); return null; }
+        return null;
+    }
+
     /// <summary>
     /// Brings the notifying app forward. Windows doesn't let a listener trigger the toast's own click, so: its open window
     /// (matched by app id or app name), else launch it by app id if Windows knows that id, else re-run its running exe
@@ -104,6 +164,11 @@ sealed class NotificationSource(CanvasDevice device)
     {
         try
         {
+            if (n.File is { } file && File.Exists(file)) // a saved screenshot: open the image itself
+            {
+                Process.Start(new ProcessStartInfo(file) { UseShellExecute = true });
+                return;
+            }
             if (FindWindow(n) is var w && w != 0)
             {
                 if (Native.IsIconic(w)) Native.ShowWindow(w, 9 /* SW_RESTORE */);

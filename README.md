@@ -5,7 +5,7 @@ A Dynamic Island for Windows, with an Apple Liquid Glass look.
 ## What it does
 
 ### The island
-- Idle: a slim glass bar hanging from the top edge, lit softly from below (the song's colour while music plays). Clicks pass through around it. With nothing playing it shows the time and date.
+- Idle: a slim glass bar hanging from the top edge, lit softly from below (the song's colour while music plays). Clicks pass through around it. It always shows the time and date (while music plays, the bar is lit in the album colour); when it opens into a pill, the time drops into the pill and fades as the pill's content rises in.
 - Hover: it swells so it's easy to grab.
 - Drag it left or right along the top edge. It stretches with speed, bounces back, snaps to left / center / right, and remembers where you left it.
 - Clicks step through stages: bar → pill → card. Right-click goes back a stage. Moving the mouse away collapses a pill to the bar; a card you opened stays until you close it.
@@ -20,6 +20,7 @@ A Dynamic Island for Windows, with an Apple Liquid Glass look.
 
 ### Notifications and notices
 - New Windows notifications drop down as a pill for 5 seconds (hover keeps them). Click to open the card, click the card to open the app, right-click to dismiss; they slide up into the edge when they leave. Windows asks once for notification access; turn off "Show notification banners" in Settings > System > Notifications to avoid doubles.
+- Full-screen captures (Win+PrtScn) saved to PicturesScreenshots get the screenshot island too (one island per capture; click it to open the image).
 - Tailored designs: messages (sender + bubble), mail (sender, subject, preview), calendar (time + countdown), calls, browser push (site), screenshots (the snip as a thumbnail), Logitech G HUB DPI, and a generic card.
 - Built-in Windows apps get their own glyph badge in the app's colour: Clock alarms and timers (still halo rings, the time or "Time's up" large, held up to 30 seconds), Windows Security (green Protected / red Action needed), Windows Update (Restart required), Microsoft Store (Installed / Updated), Game Bar clips and screenshots, Phone Link messages and calls, Microsoft To Do reminders as calendar cards, and Windows system toasts: USB drives (AutoPlay), low disk space, printing, Bluetooth pairing, OneDrive, Windows Backup, new startup apps, audio and Wi-Fi. Snipping Tool screen recordings get the recording design. Badge cards size themselves to their text.
 - `DynamicIsland.exe --preview <folder>` renders every notification design to PNG and exits (the island hides itself from screenshots). Windows only gives the island a notification's text and app icon, so images inside toasts, toast buttons and inline replies aren't available.

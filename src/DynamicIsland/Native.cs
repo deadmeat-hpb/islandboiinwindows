@@ -63,6 +63,7 @@ static class Native
     }
     [DllImport("shell32.dll")] static extern int SHGetPropertyStoreForWindow(nint hwnd, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out IPropertyStore store);
     [DllImport("ole32.dll")] static extern int PropVariantClear(ref PROPVARIANT v);
+    [DllImport("shell32.dll")] public static extern int SHGetKnownFolderPath(ref Guid id, uint flags, nint token, out nint path);
 
     /// <summary>The window's System.AppUserModel.ID property, or null.</summary>
     public static string? WindowAppId(nint hwnd)
