@@ -288,7 +288,8 @@ public sealed class IslandWindow : Window
         if (now - _lastFullscreenCheck > 1 && _flow?.IsPlaying != true) // fullscreen games, videos and presentations: never hide, just stay the idle bar (our own flow overlay doesn't count)
         {
             _lastFullscreenCheck = now;
-            _fullscreen = Native.SHQueryUserNotificationState(out int state) == 0 && state is 2 or 3 or 4 && !SnippingInFront();
+            // D3D exclusive full screen and presentations always count; "busy" (a window covering the screen) only when it's an app.
+            _fullscreen = Native.SHQueryUserNotificationState(out int state) == 0 && (state is 3 or 4 || state == 2 && AppFillsScreen());
         }
         if (_fullscreen && _mode != Mode.Idle) { _pinned = false; SetMode(Mode.Idle); }
 
@@ -327,18 +328,15 @@ public sealed class IslandWindow : Window
 
     /// <summary>Moves the canvas only when the island nears its edge, so it rarely moves mid-animation.</summary>
     /// <summary>
-    /// True while the Snipping Tool overlay (Win+Shift+S, PrtScn) is in front: it covers the screen, so Windows reports
-    /// "full screen", but it isn't a game or video, and treating it as one closed the screenshot pill halfway out.
+    /// True when the foreground window is an ordinary app window covering this monitor (a game, a full-screen video).
+    /// Always-on-top and tool windows are overlays, not apps: the snipping overlay, Alt+Tab, Start, Game Bar.
     /// </summary>
-    static bool SnippingInFront()
+    bool AppFillsScreen()
     {
-        try
-        {
-            Native.GetWindowThreadProcessId(Native.GetForegroundWindow(), out uint pid);
-            using var p = System.Diagnostics.Process.GetProcessById((int)pid);
-            return p.ProcessName is "ScreenClippingHost" or "SnippingTool" or "ScreenSketch";
-        }
-        catch { return false; }
+        nint fg = Native.GetForegroundWindow();
+        if (fg == 0 || fg == _hwnd) return false;
+        if ((Native.GetWindowLongPtr(fg, Native.GWL_EXSTYLE) & (Native.WS_EX_TOPMOST | Native.WS_EX_TOOLWINDOW)) != 0) return false;
+        return Native.GetWindowRect(fg, out var r) && r.Left <= _monLeft && r.Top <= _monTop && r.Right >= _monLeft + _monW && r.Bottom >= _monTop + _monH;
     }
 
     void FollowIsland()
