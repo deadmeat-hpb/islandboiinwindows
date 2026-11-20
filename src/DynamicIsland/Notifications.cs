@@ -147,7 +147,7 @@ sealed class NotificationSource(CanvasDevice device)
                 try { using var p = Process.GetProcessById((int)pid); mine = Mine(p, n); } catch { mine = false; }
                 seen[pid] = mine;
             }
-            if (mine) { found = hwnd; return false; }
+            if (mine || n.AppId.Length > 0 && Native.WindowAppId(hwnd) == n.AppId) { found = hwnd; return false; } // Store apps live in an ApplicationFrameHost frame
             return true;
         }, 0);
         return found;

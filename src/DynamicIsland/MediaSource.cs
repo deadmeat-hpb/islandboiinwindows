@@ -263,6 +263,7 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
                 catch { mine = false; }
                 appIds[pid] = mine;
             }
+            if (!mine) mine = Native.WindowAppId(hwnd) == id; // Store apps (Media Player, ...): the ApplicationFrameHost frame names its app
             if (mine && hasTitle) { titled = hwnd; return false; }
             if (hasTitle && titledAny == 0) titledAny = hwnd;
             if (mine && any == 0) any = hwnd; // windows enumerate front to back, so this is the app's most recent window

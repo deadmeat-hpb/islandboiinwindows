@@ -47,4 +47,39 @@ static class Native
     public const uint EVENT_SYSTEM_MINIMIZESTART = 0x16, WINEVENT_OUTOFCONTEXT = 0;
     public delegate void WinEventProc(nint hook, uint ev, nint hwnd, int idObject, int idChild, uint thread, uint time);
     [DllImport("user32.dll")] public static extern nint SetWinEventHook(uint min, uint max, nint module, WinEventProc proc, uint pid, uint thread, uint flags);
+
+    // Store (UWP) apps like Media Player draw inside an ApplicationFrameHost window; that frame carries the app's
+    // AppUserModelID as a window property, which is the only reliable way to tell whose frame it is.
+    [StructLayout(LayoutKind.Sequential)] struct PROPERTYKEY { public Guid fmtid; public uint pid; }
+    [StructLayout(LayoutKind.Sequential)] struct PROPVARIANT { public ushort vt, r1, r2, r3; public nint p, p2; }
+    [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IPropertyStore
+    {
+        int GetCount(out uint count);
+        int GetAt(uint index, out PROPERTYKEY key);
+        int GetValue(ref PROPERTYKEY key, out PROPVARIANT value);
+        int SetValue(ref PROPERTYKEY key, ref PROPVARIANT value);
+        int Commit();
+    }
+    [DllImport("shell32.dll")] static extern int SHGetPropertyStoreForWindow(nint hwnd, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out IPropertyStore store);
+    [DllImport("ole32.dll")] static extern int PropVariantClear(ref PROPVARIANT v);
+
+    /// <summary>The window's System.AppUserModel.ID property, or null.</summary>
+    public static string? WindowAppId(nint hwnd)
+    {
+        try
+        {
+            var iid = typeof(IPropertyStore).GUID;
+            if (SHGetPropertyStoreForWindow(hwnd, ref iid, out var store) != 0) return null;
+            try
+            {
+                var key = new PROPERTYKEY { fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), pid = 5 };
+                if (store.GetValue(ref key, out var v) != 0) return null;
+                try { return v.vt == 31 /* VT_LPWSTR */ ? Marshal.PtrToStringUni(v.p) : null; }
+                finally { PropVariantClear(ref v); }
+            }
+            finally { Marshal.ReleaseComObject(store); }
+        }
+        catch { return null; }
+    }
 }
