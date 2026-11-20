@@ -36,7 +36,7 @@ cd src/DynamicIsland
 dotnet build -c Release -p:Platform=x64 -r win-x64
 ```
 
-The app is self-contained for the Windows App SDK; run `bin\x64\Release\net8.0-windows10.0.22621.0\win-x64\DynamicIsland.exe`. It registers itself to start at sign-in and to restart after a crash. Quit it from Task Manager.
+The app is self-contained for the Windows App SDK; run `bin\x64\Release\net8.0-windows10.0.22621.0\win-x64\DynamicIsland.exe`. It registers itself to start at sign-in and to restart after a crash. Quit it from Task Manager. On the laptop a scheduled task "DynamicIsland Restart" also relaunches it when Windows logs a crash (Application Error 1000), which covers crashes in the first minute; errors are logged to %LOCALAPPDATA%DynamicIslandDataash.log.
 
 Unsigned builds are blocked while Windows Smart App Control is on.
 
