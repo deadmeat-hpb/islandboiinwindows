@@ -34,6 +34,14 @@ static class Preview
         ("gamebar-clip", new IslandNotification("Game Bar", "Game clip recorded", "Valorant · 0:30", null, "Microsoft.XboxGamingOverlay_8wekyb3d8bbwe!App", At: DateTime.Now)),
         ("gamebar-shot", new IslandNotification("Game Bar", "Screenshot saved", "Valorant", null, "Microsoft.XboxGamingOverlay_8wekyb3d8bbwe!App", At: DateTime.Now)),
         ("phonelink", new IslandNotification("Phone Link", "Mum", "Are you coming home for dinner?", null, "Microsoft.YourPhone_8wekyb3d8bbwe!App", ColorHelper.FromArgb(255, 80, 140, 255), DateTime.Now)),
+        ("usb", new IslandNotification("AutoPlay", "USB Drive (E:)", "Select to choose what happens with removable drives.", null, "Windows.SystemToast.AutoPlay", At: DateTime.Now)),
+        ("lowdisk", new IslandNotification("Low Disk Space", "You're running out of space on Local Disk (C:)", "Free up space to keep your PC running smoothly.", null, "Windows.SystemToast.LowDisk", At: DateTime.Now)),
+        ("print", new IslandNotification("Print", "Document printed", "Report.pdf printed on HP LaserJet", null, "Windows.SystemToast.Print.Notification", At: DateTime.Now)),
+        ("bluetooth", new IslandNotification("Bluetooth", "New Bluetooth device found", "Galaxy Buds2 Pro · Select to pair", null, "Windows.SystemToast.BthQuickPair", At: DateTime.Now)),
+        ("onedrive", new IslandNotification("OneDrive", "OneDrive sync is paused", "Sync will resume in 2 hours.", null, "Microsoft.SkyDrive.Desktop", At: DateTime.Now)),
+        ("backup", new IslandNotification("Windows Backup", "Backup complete", "Your files, settings and apps are backed up.", null, "MicrosoftWindows.Client.CBS_cw5n1h2txyewy!WindowsBackup", At: DateTime.Now)),
+        ("startup", new IslandNotification("Settings", "New startup app", "TIDAL is set to run when you sign in.", null, "Windows.SystemToast.StartupApp", At: DateTime.Now)),
+        ("snip-record", new IslandNotification("Snipping Tool", "Screen recording saved", "Saved to Videos\\Screen Recordings", null, "Microsoft.ScreenSketch_8wekyb3d8bbwe!App", At: DateTime.Now)),
         ("todo", new IslandNotification("Microsoft To Do", "Reminder: Submit report", "Today 17:00", null, "Microsoft.Todos_8wekyb3d8bbwe!App", ColorHelper.FromArgb(255, 80, 140, 255), DateTime.Now)),
     ];
 

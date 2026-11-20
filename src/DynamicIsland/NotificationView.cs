@@ -12,7 +12,7 @@ using FontWeight = Windows.UI.Text.FontWeight;
 namespace DynamicIsland;
 
 /// <summary>What kind of notification it is, which picks its pill and card design.</summary>
-enum NoteKind { Generic, Message, Mail, Calendar, Call, Web, Screenshot, Dpi, Alarm, Security, Update, Store, Capture }
+enum NoteKind { Generic, Message, Mail, Calendar, Call, Web, Screenshot, Dpi, Alarm, Security, Update, Store, Capture, System }
 
 /// <summary>
 /// Notification pills and cards. Windows only gives a notification listener the toast's text and the app's icon (no
@@ -30,6 +30,7 @@ static partial class NotificationView
     [GeneratedRegex(@"^(?:https?://)?([\w-]+\.)+[a-z]{2,}(/\S*)?$", RegexOptions.IgnoreCase)] private static partial Regex Domain();
     [GeneratedRegex(@"\b(\d{1,2}):(\d{2})\s*(am|pm|上午|下午)?", RegexOptions.IgnoreCase)] private static partial Regex Clock();
     [GeneratedRegex(@"\d{2,5}")] private static partial Regex Number();
+    [GeneratedRegex(@"record|video|clip|錄製|錄影|剪輯", RegexOptions.IgnoreCase)] private static partial Regex RecordText();
 
     static bool Has(string s, string[] keys) => keys.Any(k => s.Contains(k, StringComparison.OrdinalIgnoreCase));
 
@@ -42,6 +43,8 @@ static partial class NotificationView
         if (Has(app, ["SecHealthUI", "Defender", "SecurityCenter"])) return NoteKind.Security;
         if (app.Contains("WindowsUpdate", StringComparison.OrdinalIgnoreCase)) return NoteKind.Update;
         if (Has(app, ["WindowsStore", "AppInitiatedDownload"])) return NoteKind.Store;
+        if (SystemBadge(app, text) is not null) return NoteKind.System;
+        if (app.Contains("ScreenSketch", StringComparison.OrdinalIgnoreCase) && RecordText().IsMatch(text)) return NoteKind.Capture; // Snipping Tool screen recording
         if (app.Contains("G HUB", StringComparison.OrdinalIgnoreCase) || app.Contains("logitech", StringComparison.OrdinalIgnoreCase))
             return text.Contains("DPI", StringComparison.OrdinalIgnoreCase) || Number().IsMatch(text) ? NoteKind.Dpi : NoteKind.Generic;
         if (app.Contains("snip", StringComparison.OrdinalIgnoreCase) || app.Contains("ScreenSketch", StringComparison.OrdinalIgnoreCase) || text.Contains("screenshot", StringComparison.OrdinalIgnoreCase))
@@ -64,9 +67,23 @@ static partial class NotificationView
         NoteKind.Screenshot => n.Thumb is null ? 120 : 214,
         NoteKind.Calendar => 140,
         NoteKind.Alarm => 132,
-        NoteKind.Security or NoteKind.Update or NoteKind.Store or NoteKind.Capture => 136,
+        NoteKind.Security or NoteKind.Update or NoteKind.Store or NoteKind.Capture or NoteKind.System => BadgeCardH(n),
         _ => 168,
     };
+
+    /// <summary>Badge cards fit their text: header, title, up to two body lines, the chip, then the bottom margin.</summary>
+    static float BadgeCardH(IslandNotification n)
+    {
+        float h = 46 + 24;
+        if (n.Body.Length > 0)
+        {
+            using var f = Format(13, FontWeights.Normal, wrap: true);
+            using var layout = new CanvasTextLayout(CanvasDevice.GetSharedDevice(), n.Body, f, CardW - 32 - 62, 40);
+            h += MathF.Min((float)layout.LayoutBounds.Height, 40);
+        }
+        if (Badge(n) is { } b && b.Chip.Length > 0 && !n.Title.Contains(b.Chip, StringComparison.OrdinalIgnoreCase)) h += 10 + 24;
+        return MathF.Max(h + 18, 112); // the 48 px badge needs about 112
+    }
 
     static Color White(float a) => ColorHelper.FromArgb((byte)Math.Clamp(a * 255, 0, 255), 255, 255, 255);
     static Color Tint(Color c, float a) => ColorHelper.FromArgb((byte)Math.Clamp(a * 255, 0, 255), c.R, c.G, c.B);
@@ -78,6 +95,7 @@ static partial class NotificationView
         WordWrapping = wrap ? CanvasWordWrapping.WholeWord : CanvasWordWrapping.NoWrap,
         TrimmingGranularity = wrap ? CanvasTextTrimmingGranularity.Word : CanvasTextTrimmingGranularity.Character,
         HorizontalAlignment = h, VerticalAlignment = v,
+        TrimmingSign = CanvasTrimmingSign.Ellipsis,
     };
 
     static void Icon(CanvasDrawingSession ds, IslandNotification n, Rect r, float a, bool round)
@@ -248,7 +266,7 @@ static partial class NotificationView
                 ds.DrawText(detail.Length > 0 ? detail : "Click to open Clock", new Rect(tx, by + 52 * s, cw, 18 * s), White(0.55f * a), sub);
                 break;
             }
-            case NoteKind.Security or NoteKind.Update or NoteKind.Store or NoteKind.Capture: // system apps: glyph badge, title, text, a status chip
+            case NoteKind.Security or NoteKind.Update or NoteKind.Store or NoteKind.Capture or NoteKind.System: // system apps: glyph badge, title, text, a status chip
             {
                 var b = Badge(n)!.Value;
                 float bs = 48 * s;
@@ -257,13 +275,16 @@ static partial class NotificationView
                 using var title = Format(15 * s, FontWeights.SemiBold);
                 using var text = Format(13 * s, FontWeights.Normal, wrap: true);
                 ds.DrawText(n.Title.Length > 0 ? n.Title : n.App, new Rect(tx, top, cw, 22 * s), White(a), title);
-                float chipH = b.Chip.Length > 0 ? 24 * s : 0;
-                Block(ds, n.Body, new Rect(tx, top + 24 * s, cw, bottom - top - 24 * s - (chipH > 0 ? chipH + 8 * s : 0)), White(0.65f * a), text);
+                float chipH = b.Chip.Length > 0 && !n.Title.Contains(b.Chip, StringComparison.OrdinalIgnoreCase) ? 24 * s : 0; // no chip that just repeats the title
+                float bodyMax = bottom - top - 24 * s - (chipH > 0 ? chipH + 10 * s : 0);
+                using var bodyLayout = new CanvasTextLayout(ds, n.Body, text, cw, bodyMax);
+                float bodyH = n.Body.Length > 0 ? MathF.Min((float)bodyLayout.LayoutBounds.Height, bodyMax) : 0;
+                Block(ds, n.Body, new Rect(tx, top + 24 * s, cw, bodyMax), White(0.65f * a), text);
                 if (chipH > 0)
                 {
                     using var chip = Format(12 * s, FontWeights.SemiBold, h: CanvasHorizontalAlignment.Center, v: CanvasVerticalAlignment.Center);
                     using var tl = new CanvasTextLayout(ds, b.Chip, chip, cw, chipH);
-                    var cr = new Rect(tx, bottom - chipH, (float)tl.LayoutBounds.Width + 22 * s, chipH);
+                    var cr = new Rect(tx, top + 24 * s + bodyH + 10 * s, (float)tl.LayoutBounds.Width + 22 * s, chipH);
                     ds.FillRoundedRectangle(cr, chipH / 2, chipH / 2, Tint(b.Color, 0.22f * a));
                     ds.DrawText(b.Chip, cr, Tint(b.Color, a), chip);
                 }
@@ -318,11 +339,34 @@ static partial class NotificationView
                         : new("\uEA18", ColorHelper.FromArgb(255, 80, 210, 130), "Protected"),
         NoteKind.Update => new("\uE895", ColorHelper.FromArgb(255, 90, 160, 255), Says(n, "restart|reboot|重新啟動|重新開機") ? "Restart required" : ""),
         NoteKind.Store => new("\uE719", ColorHelper.FromArgb(255, 130, 150, 255), Says(n, "install|安裝") ? "Installed" : Says(n, "update|更新") ? "Updated" : ""),
-        NoteKind.Capture => Says(n, "clip|record|錄製|剪輯")
-                        ? new("\uE714", ColorHelper.FromArgb(255, 255, 85, 85), "Clip saved")
-                        : new("\uE722", ColorHelper.FromArgb(255, 90, 200, 110), "Screenshot saved"),
+        NoteKind.Capture => !RecordText().IsMatch($"{n.Title}\n{n.Body}") ? new("\uE722", ColorHelper.FromArgb(255, 90, 200, 110), "Screenshot saved")
+                        : new("\uE714", ColorHelper.FromArgb(255, 255, 85, 85), n.AppId.Contains("ScreenSketch", StringComparison.OrdinalIgnoreCase) ? "Recording saved" : "Clip saved"),
+        NoteKind.System => SystemBadge($"{n.App} {n.AppId}", $"{n.Title}\n{n.Body}"),
         _ => null,
     };
+
+    static bool Says(string text, string pattern) => Regex.IsMatch(text, pattern, RegexOptions.IgnoreCase);
+
+    /// <summary>Windows' own system toasts (Windows.SystemToast.*, OneDrive, Backup), matched by app id.</summary>
+    static BadgeInfo? SystemBadge(string app, string text)
+    {
+        bool Is(params string[] ids) => ids.Any(i => app.Contains(i, StringComparison.OrdinalIgnoreCase));
+        if (Is("SystemToast.AutoPlay")) return new("\uE88E", ColorHelper.FromArgb(255, 80, 205, 220), "Drive connected");
+        if (Is("SystemToast.LowDisk")) return new("\uEDA2", ColorHelper.FromArgb(255, 255, 120, 70), "Low space");
+        if (Is("SystemToast.Print"))
+            return Says(text, "error|fail|jam|out of|錯誤|失敗|卡紙") ? new("\uE749", ColorHelper.FromArgb(255, 255, 95, 85), "Needs attention")
+                 : new("\uE749", ColorHelper.FromArgb(255, 160, 180, 210), Says(text, "printed|complete|done|列印完成|完成") ? "Printed" : "");
+        if (Is("SystemToast.Bthprops", "SystemToast.BthQuickPair")) return new("\uE702", ColorHelper.FromArgb(255, 70, 140, 255), Says(text, "pair|配對") ? "Ready to pair" : "");
+        if (Is("SkyDrive", "OneDrive"))
+            return Says(text, "paused|暫停") ? new("\uE753", Amber, "Sync paused")
+                 : Says(text, "full|storage|空間") ? new("\uE753", ColorHelper.FromArgb(255, 255, 120, 70), "Storage full")
+                 : new("\uE753", ColorHelper.FromArgb(255, 60, 150, 255), "");
+        if (Is("WindowsBackup")) return new("\uE898", ColorHelper.FromArgb(255, 80, 210, 130), Says(text, "complete|backed up|完成|已備份") ? "Backed up" : "");
+        if (Is("SystemToast.StartupApp")) return new("\uE7E8", Amber, "New startup app");
+        if (Is("SystemToast.DefaultAudioEndpoint", "SystemToast.AudioTroubleshooter")) return new("\uE767", ColorHelper.FromArgb(255, 150, 180, 255), "");
+        if (Is("SystemToast.WiFiNetworkManager")) return new("\uE701", ColorHelper.FromArgb(255, 90, 160, 255), "");
+        return null;
+    }
 
     /// <summary>Tinted circle with the glyph; a ringing badge sends out slow ripples and shakes like a bell.</summary>
     static void DrawBadge(CanvasDrawingSession ds, Rect r, float s, BadgeInfo b, float a, bool ringing)
