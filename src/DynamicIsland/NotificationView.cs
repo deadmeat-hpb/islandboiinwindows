@@ -224,9 +224,8 @@ static partial class NotificationView
             case NoteKind.Call: // caller centred, a slow ring around the avatar
             {
                 float av = 56 * s, ax = x + pad, ay = y + ((float)r.Height - av) / 2;
-                double t = DateTime.Now.TimeOfDay.TotalSeconds;
-                float ring = (float)(t % 1.6 / 1.6);
-                ds.DrawCircle(ax + av / 2, ay + av / 2, av / 2 + 4 * s + ring * 10 * s, Tint(accent, (1 - ring) * 0.5f * a), 2 * s);
+                for (int k = 1; k <= 2; k++) // still halo rings around the caller (static: no redraws while it rings)
+                    ds.DrawCircle(ax + av / 2, ay + av / 2, av / 2 + k * 5 * s, Tint(accent, (0.5f - k * 0.17f) * a), 1.5f * s);
                 Icon(ds, n, new Rect(ax, ay, av, av), a, true);
                 using var who = Format(18 * s, FontWeights.SemiBold);
                 using var what = Format(13 * s, FontWeights.Normal);
@@ -397,24 +396,17 @@ static partial class NotificationView
         return null;
     }
 
-    /// <summary>Tinted circle with the glyph; a ringing badge sends out slow ripples and shakes like a bell.</summary>
+    /// <summary>Tinted circle with the glyph; a ringing badge gets two still halo rings (static: nothing redraws while it waits).</summary>
     static void DrawBadge(CanvasDrawingSession ds, Rect r, float s, BadgeInfo b, float a, bool ringing)
     {
         float cx = (float)(r.X + r.Width / 2), cy = (float)(r.Y + r.Height / 2), rad = (float)r.Width / 2;
-        double t = DateTime.Now.TimeOfDay.TotalSeconds;
         if (ringing)
-            for (int i = 0; i < 2; i++)
-            {
-                float p = (float)((t / 1.4 + i * 0.5) % 1);
-                ds.DrawCircle(cx, cy, rad + 2 * s + p * 12 * s, Tint(b.Color, (1 - p) * 0.45f * a), 2 * s);
-            }
+            for (int i = 1; i <= 2; i++)
+                ds.DrawCircle(cx, cy, rad + i * 5 * s, Tint(b.Color, (0.5f - i * 0.17f) * a), 1.5f * s);
         ds.FillCircle(cx, cy, rad, Tint(b.Color, 0.22f * a));
         ds.DrawCircle(cx, cy, rad - 0.5f * s, Tint(b.Color, 0.35f * a), 1 * s);
         using var glyph = new CanvasTextFormat { FontFamily = "Segoe Fluent Icons", FontSize = rad * 0.95f, HorizontalAlignment = CanvasHorizontalAlignment.Center, VerticalAlignment = CanvasVerticalAlignment.Center };
-        var old = ds.Transform;
-        if (ringing) ds.Transform = Matrix3x2.CreateRotation(0.22f * MathF.Sin((float)t * 18) * MathF.Max(0, MathF.Sin((float)t * 2.2f)), new Vector2(cx, cy - rad * 0.4f)) * old; // bursts of bell shake
         ds.DrawText(b.Glyph, r, Tint(b.Color, a), glyph);
-        ds.Transform = old;
     }
 
     /// <summary>"in 10 min" for a time later today found in the text, else "".</summary>

@@ -396,14 +396,13 @@ static class HudView
         WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character, TrimmingSign = CanvasTrimmingSign.Ellipsis,
     };
 
-    /// <summary>Tinted circle with the glyph (as on the built-in app notifications); <paramref name="pulse"/> breathes it while charging.</summary>
+    /// <summary>Tinted circle with the glyph (as on the built-in app notifications); <paramref name="pulse"/> adds a still halo ring while charging.</summary>
     static void Badge(CanvasDrawingSession ds, Rect r, float s, string glyph, Color c, float a, bool pulse)
     {
         float cx = (float)(r.X + r.Width / 2), cy = (float)(r.Y + r.Height / 2), rad = (float)r.Width / 2;
         if (pulse)
         {
-            float p = (float)(DateTime.Now.TimeOfDay.TotalSeconds / 1.8 % 1);
-            ds.DrawCircle(cx, cy, rad + 2 * s + p * 9 * s, Tint(c, (1 - p) * 0.4f * a), 1.5f * s);
+            ds.DrawCircle(cx, cy, rad + 5 * s, Tint(c, 0.3f * a), 1.5f * s);
         }
         ds.FillCircle(cx, cy, rad, Tint(c, 0.22f * a));
         ds.DrawCircle(cx, cy, rad - 0.5f * s, Tint(c, 0.35f * a), 1 * s);
