@@ -85,7 +85,7 @@ static class Glass
     {
         using var list = new CanvasCommandList(ds);
         using (var c = list.CreateDrawingSession()) c.FillGeometry(shape, Colors.White);
-        using var halo = new ShadowEffect { Source = list, BlurAmount = 16 * s, ShadowColor = WithAlpha(glow, 0.16f * strength) };
+        using var halo = new ShadowEffect { Source = list, BlurAmount = 16 * s, Optimization = EffectOptimization.Speed, ShadowColor = WithAlpha(glow, 0.16f * strength) };
         ds.DrawImage(halo);
     }
 
@@ -93,26 +93,36 @@ static class Glass
     {
         using var list = new CanvasCommandList(ds);
         using (var c = list.CreateDrawingSession()) c.FillGeometry(shape, Colors.Black);
-        using var shadow = new ShadowEffect { Source = list, BlurAmount = 12 * s, ShadowColor = Gray((int)(110 * expand), 0) };
+        using var shadow = new ShadowEffect { Source = list, BlurAmount = 12 * s, Optimization = EffectOptimization.Speed, ShadowColor = Gray((int)(110 * expand), 0) };
         ds.DrawImage(shadow, 0, 6 * s);
     }
 
     static void DrawRefraction(CanvasDrawingSession ds, ICanvasImage background, CanvasGeometry shape, Rect rect, float r, float s, float expand)
     {
         // Blur once into a cached bitmap; the lens rings below all sample from it instead of re-running the blur.
+        // The blur runs at 1/k resolution (k = display scale): on a 200% laptop panel that is a quarter of the pixels,
+        // which integrated GPUs need to hold 60 fps. It is blurred anyway, so the upscale doesn't show.
+        float k = MathF.Max(1, s);
         float pad = 40 * s;
         var src = new Rect(rect.X - pad, rect.Y - pad, rect.Width + 2 * pad, rect.Height + 2 * pad);
-        if (_blurred is null || _blurred.Device != ds.Device || _blurred.Size.Width < src.Width || _blurred.Size.Height < src.Height)
+        float bw = (float)src.Width / k, bh = (float)src.Height / k;
+        if (_blurred is null || _blurred.Device != ds.Device || _blurred.Size.Width < bw || _blurred.Size.Height < bh)
         {
             _blurred?.Dispose();
-            _blurred = new CanvasRenderTarget(ds.Device, (float)src.Width + 256, (float)src.Height + 128, 96); // headroom so morphing rarely reallocates
+            _blurred = new CanvasRenderTarget(ds.Device, bw + 256 / k, bh + 128 / k, 96); // headroom so morphing rarely reallocates
         }
-        using (var blur = new GaussianBlurEffect { Source = background, BlurAmount = (1.2f + 6 * expand) * s, BorderMode = EffectBorderMode.Hard })
+        using (var small = new Transform2DEffect
+        {
+            Source = background,
+            TransformMatrix = Matrix3x2.CreateTranslation(-(float)src.X, -(float)src.Y) * Matrix3x2.CreateScale(1 / k),
+            InterpolationMode = CanvasImageInterpolation.Linear,
+        })
+        using (var blur = new GaussianBlurEffect { Source = small, BlurAmount = (1.2f + 6 * expand) * s / k, BorderMode = EffectBorderMode.Hard, Optimization = EffectOptimization.Speed })
         using (var sat = new SaturationEffect { Source = blur, Saturation = 1.4f })
         using (var b = _blurred.CreateDrawingSession())
         {
             b.Clear(Colors.Transparent);
-            b.DrawImage(sat, 0, 0, src);
+            b.DrawImage(sat, 0, 0, new Rect(0, 0, bw, bh));
         }
         var glass = _blurred;
         var origin = new Vector2((float)src.X, (float)src.Y);
@@ -128,22 +138,22 @@ static class Glass
         {
             float t = 1 - (i + 0.5f) / rings; // 1 at the edge, 0 inside
             using var clip = i == 0 ? null : RoundRect(ds, rect, r, band * i / rings);
-            DrawLens(ds, glass, origin, clip ?? shape, c, hw, hh, band * 1.6f * t * t); // outer ring fills the whole shape, shoulders included
+            DrawLens(ds, glass, k, origin, clip ?? shape, c, hw, hh, band * 1.6f * t * t); // outer ring fills the whole shape, shoulders included
         }
 
         // Body: a touch of magnification, like thick glass.
         using (var body = RoundRect(ds, rect, r, band))
-            DrawLens(ds, glass, origin, body, c, hw, hh, -0.04f * MathF.Min(hw, hh));
+            DrawLens(ds, glass, k, origin, body, c, hw, hh, -0.04f * MathF.Min(hw, hh));
     }
 
     /// <summary>Draws <paramref name="src"/> inside <paramref name="clip"/>, sampling from <paramref name="d"/> px further out at the edge.</summary>
-    static void DrawLens(CanvasDrawingSession ds, ICanvasImage src, Vector2 origin, CanvasGeometry clip, Vector2 c, float hw, float hh, float d)
+    static void DrawLens(CanvasDrawingSession ds, ICanvasImage src, float k, Vector2 origin, CanvasGeometry clip, Vector2 c, float hw, float hh, float d)
     {
         float mx = hw / MathF.Max(hw + d, 0.5f), my = hh / MathF.Max(hh + d, 0.5f);
         using var lens = new Transform2DEffect
         {
             Source = src,
-            TransformMatrix = Matrix3x2.CreateTranslation(origin - c) * Matrix3x2.CreateScale(mx, my) * Matrix3x2.CreateTranslation(c),
+            TransformMatrix = Matrix3x2.CreateScale(k) * Matrix3x2.CreateTranslation(origin - c) * Matrix3x2.CreateScale(mx, my) * Matrix3x2.CreateTranslation(c),
             InterpolationMode = CanvasImageInterpolation.Linear,
         };
         using (ds.CreateLayer(1f, clip)) ds.DrawImage(lens);
