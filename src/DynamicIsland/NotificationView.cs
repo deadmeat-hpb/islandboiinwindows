@@ -30,7 +30,7 @@ static partial class NotificationView
     [GeneratedRegex(@"^(?:https?://)?([\w-]+\.)+[a-z]{2,}(/\S*)?$", RegexOptions.IgnoreCase)] private static partial Regex Domain();
     [GeneratedRegex(@"\b(\d{1,2}):(\d{2})\s*(am|pm|上午|下午)?", RegexOptions.IgnoreCase)] private static partial Regex Clock();
     [GeneratedRegex(@"\d{2,5}")] private static partial Regex Number();
-    [GeneratedRegex(@"record|video|clip|錄製|錄影|剪輯", RegexOptions.IgnoreCase)] private static partial Regex RecordText();
+    [GeneratedRegex(@"record|video|\bclips?\b|錄製|錄影|剪輯", RegexOptions.IgnoreCase)] private static partial Regex RecordText();
 
     static bool Has(string s, string[] keys) => keys.Any(k => s.Contains(k, StringComparison.OrdinalIgnoreCase));
 
@@ -64,7 +64,7 @@ static partial class NotificationView
     {
         NoteKind.Dpi => 120,
         NoteKind.Call => 132,
-        NoteKind.Screenshot => n.Thumb is null ? 120 : 214,
+        NoteKind.Screenshot => n.Thumb is { } t ? 46 + 48 + ShotSize(t).H + 18 : 112,
         NoteKind.Calendar => 140,
         NoteKind.Alarm => 132,
         NoteKind.Security or NoteKind.Update or NoteKind.Store or NoteKind.Capture or NoteKind.System => BadgeCardH(n),
@@ -139,7 +139,8 @@ static partial class NotificationView
         var kind = KindOf(n);
         float icon = 40 * s;
         var iconRect = new Rect(x + 16 * s, y + (h - icon) / 2, icon, icon);
-        if (Badge(n) is { } badge) DrawBadge(ds, iconRect, s, badge, a, kind == NoteKind.Alarm);
+        if (kind == NoteKind.Screenshot && n.Thumb is { } snip) Cover(ds, snip, iconRect, 10 * s, s, a); // the snip itself
+        else if (Badge(n) is { } badge) DrawBadge(ds, iconRect, s, badge, a, kind == NoteKind.Alarm);
         else Icon(ds, n, iconRect, a, kind is NoteKind.Message or NoteKind.Call);
         float tx = x + 70 * s, tw = w - 86 * s;
         using var title = Format(15 * s, FontWeights.SemiBold);
@@ -233,17 +234,26 @@ static partial class NotificationView
                 ds.DrawText($"{n.App} · {(n.Body.Length > 0 ? n.Body.Split('\n')[0] : "Incoming call")}", new Rect(ax + av + 16 * s, ay + 32 * s, tw - av - 16 * s, 20 * s), White(0.6f * a), what);
                 break;
             }
-            case NoteKind.Screenshot: // the capture itself, when it's on the clipboard
+            case NoteKind.Screenshot: // badge, title + status, then the snip itself
             {
+                var b = Badge(n)!.Value;
+                float bs = 40 * s;
+                DrawBadge(ds, new Rect(x + pad, top, bs, bs), s, b, a, false);
+                float tx = x + pad + bs + 12 * s, cw = tw - bs - 12 * s;
                 using var title = Format(15 * s, FontWeights.SemiBold);
-                ds.DrawText(n.Title.Length > 0 ? n.Title : "Screenshot", new Rect(x + pad, top, tw, 22 * s), White(a), title);
+                using var sub = Format(12.5f * s, FontWeights.Normal);
+                ds.DrawText(n.Title.Length > 0 ? n.Title : "Screenshot", new Rect(tx, top - 1 * s, cw, 22 * s), White(a), title);
+                string status = n.Body.Length > 0 ? n.Body.Replace('\n', ' ')
+                    : n.Thumb is not null && !n.Title.Contains("clipboard", StringComparison.OrdinalIgnoreCase) ? "Copied to clipboard" : "Click to mark up";
+                ds.DrawText(status, new Rect(tx, top + 20 * s, cw, 20 * s), Tint(b.Color, a), sub);
                 if (n.Thumb is { } img)
                 {
-                    float maxH = bottom - top - 30 * s, scale = MathF.Min(tw / (float)img.Size.Width, maxH / (float)img.Size.Height);
-                    var dest = new Rect(x + pad, top + 30 * s, img.Size.Width * scale, img.Size.Height * scale);
-                    MediaView.DrawArt(ds, img, dest, 8 * s, a);
+                    var (sw, sh) = ShotSize(img);
+                    var dest = new Rect(x + (float)r.Width / 2 - sw * s / 2, top + 48 * s, sw * s, sh * s);
+                    ds.FillRoundedRectangle(new Rect(x + pad, dest.Y, tw, dest.Height), 12 * s, 12 * s, White(0.05f * a)); // a soft tray behind narrow snips
+                    MediaView.DrawArt(ds, img, dest, 12 * s, a);
+                    ds.DrawRoundedRectangle(dest, 12 * s, 12 * s, White(0.18f * a), 1 * s);
                 }
-                else ds.DrawText(n.Body.Length > 0 ? n.Body.Replace('\n', ' ') : "Click to open", new Rect(x + pad, top + 26 * s, tw, 20 * s), White(0.6f * a), Format(13 * s, FontWeights.Normal));
                 break;
             }
             case NoteKind.Alarm: // Clock: ringing badge, the time large, the alarm or timer name
@@ -341,9 +351,28 @@ static partial class NotificationView
         NoteKind.Store => new("\uE719", ColorHelper.FromArgb(255, 130, 150, 255), Says(n, "install|安裝") ? "Installed" : Says(n, "update|更新") ? "Updated" : ""),
         NoteKind.Capture => !RecordText().IsMatch($"{n.Title}\n{n.Body}") ? new("\uE722", ColorHelper.FromArgb(255, 90, 200, 110), "Screenshot saved")
                         : new("\uE714", ColorHelper.FromArgb(255, 255, 85, 85), n.AppId.Contains("ScreenSketch", StringComparison.OrdinalIgnoreCase) ? "Recording saved" : "Clip saved"),
+        NoteKind.Screenshot => new("\uE722", ColorHelper.FromArgb(255, 90, 200, 110), ""),
         NoteKind.System => SystemBadge($"{n.App} {n.AppId}", $"{n.Title}\n{n.Body}"),
         _ => null,
     };
+
+    /// <summary>The snip's size on the card in DIPs: card width, at most 170 tall.</summary>
+    static (float W, float H) ShotSize(CanvasBitmap img)
+    {
+        float maxW = CardW - 32, maxH = 170, k = MathF.Min(maxW / (float)img.Size.Width, maxH / (float)img.Size.Height);
+        return ((float)img.Size.Width * k, (float)img.Size.Height * k);
+    }
+
+    /// <summary>The image cropped to fill <paramref name="dest"/> (centre crop), with rounded corners and a thin rim.</summary>
+    static void Cover(CanvasDrawingSession ds, CanvasBitmap img, Rect dest, float radius, float s, float a)
+    {
+        double k = Math.Max(dest.Width / img.Size.Width, dest.Height / img.Size.Height);
+        double sw = dest.Width / k, sh = dest.Height / k;
+        var src = new Rect((img.Size.Width - sw) / 2, (img.Size.Height - sh) / 2, sw, sh);
+        using var clip = Microsoft.Graphics.Canvas.Geometry.CanvasGeometry.CreateRoundedRectangle(ds, dest, radius, radius);
+        using (ds.CreateLayer(a, clip)) ds.DrawImage(img, dest, src);
+        ds.DrawRoundedRectangle(dest, radius, radius, White(0.22f * a), 1 * s);
+    }
 
     static bool Says(string text, string pattern) => Regex.IsMatch(text, pattern, RegexOptions.IgnoreCase);
 

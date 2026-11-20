@@ -45,11 +45,24 @@ static class Preview
         ("todo", new IslandNotification("Microsoft To Do", "Reminder: Submit report", "Today 17:00", null, "Microsoft.Todos_8wekyb3d8bbwe!App", ColorHelper.FromArgb(255, 80, 140, 255), DateTime.Now)),
     ];
 
+    /// <summary>A stand-in snip: a window-like gradient with a title bar and a few text lines.</summary>
+    static CanvasBitmap FakeSnip(CanvasDevice device, float w, float h)
+    {
+        var rt = new CanvasRenderTarget(device, w, h, 96);
+        using var ds = rt.CreateDrawingSession();
+        using var g = new Microsoft.Graphics.Canvas.Brushes.CanvasLinearGradientBrush(ds, Color.FromArgb(255, 40, 90, 160), Color.FromArgb(255, 120, 60, 150)) { StartPoint = new(0, 0), EndPoint = new(w, h) };
+        ds.FillRectangle(0, 0, w, h, g);
+        ds.FillRectangle(0, 0, w, 28, Color.FromArgb(255, 30, 30, 34));
+        for (int i = 0; i < 5; i++) ds.FillRoundedRectangle(24, 52 + i * 26, (w - 48) * (0.9f - i * 0.12f), 12, 6, 6, Color.FromArgb(150, 255, 255, 255));
+        return rt;
+    }
+
     static void Render(string dir)
     {
         var device = CanvasDevice.GetSharedDevice();
         const float s = 2;
-        foreach (var (name, note) in Samples())
+        foreach (var (name, note) in Samples().Append(("screenshot", new IslandNotification("Snipping Tool", "Screenshot copied to clipboard", "Select to mark up and share.", null, "Microsoft.ScreenSketch_8wekyb3d8bbwe!App", At: DateTime.Now, Thumb: FakeSnip(device, 640, 400))))
+                                                   .Append(("screenshot-tall", new IslandNotification("Snipping Tool", "Screenshot copied to clipboard", "", null, "Microsoft.ScreenSketch_8wekyb3d8bbwe!App", At: DateTime.Now, Thumb: FakeSnip(device, 300, 520)))))
         {
             float w = NotificationView.CardW * s, ch = NotificationView.CardH(note) * s, ph = 72 * s, gap = 20 * s;
             using var target = new CanvasRenderTarget(device, w + 40 * s, ph + ch + gap + 40 * s, 96);
