@@ -15,6 +15,7 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        if (Preview.TryRun()) { Exit(); return; } // design previews to PNG, then quit (see Preview.cs)
         _single = new Mutex(true, "DynamicIsland.SingleInstance", out bool first);
         if (!first) { Exit(); return; } // already running (e.g. started at sign-in)
 

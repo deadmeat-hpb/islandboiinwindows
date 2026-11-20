@@ -12,7 +12,7 @@ using FontWeight = Windows.UI.Text.FontWeight;
 namespace DynamicIsland;
 
 /// <summary>What kind of notification it is, which picks its pill and card design.</summary>
-enum NoteKind { Generic, Message, Mail, Calendar, Call, Web, Screenshot, Dpi }
+enum NoteKind { Generic, Message, Mail, Calendar, Call, Web, Screenshot, Dpi, Alarm, Security, Update, Store, Capture }
 
 /// <summary>
 /// Notification pills and cards. Windows only gives a notification listener the toast's text and the app's icon (no
@@ -21,7 +21,7 @@ enum NoteKind { Generic, Message, Mail, Calendar, Call, Web, Screenshot, Dpi }
 /// </summary>
 static partial class NotificationView
 {
-    static readonly string[] Messengers = ["whatsapp", "telegram", "discord", "line", "wechat", "weixin", "messenger", "teams", "signal", "slack", "skype", "instagram"];
+    static readonly string[] Messengers = ["whatsapp", "telegram", "discord", "line", "wechat", "weixin", "messenger", "teams", "signal", "slack", "skype", "instagram", "yourphone", "phone link"];
     static readonly string[] Mailers = ["outlook", "mail", "gmail", "thunderbird", "spark"];
     static readonly string[] Browsers = ["chrome", "edge", "firefox", "brave", "opera", "vivaldi", "arc"];
 
@@ -36,13 +36,19 @@ static partial class NotificationView
     public static NoteKind KindOf(IslandNotification n)
     {
         string app = $"{n.App} {n.AppId}", text = $"{n.Title}\n{n.Body}";
+        // Built-in Windows apps, by app id (display names are localized).
+        if (app.Contains("WindowsAlarms", StringComparison.OrdinalIgnoreCase)) return NoteKind.Alarm;
+        if (app.Contains("XboxGamingOverlay", StringComparison.OrdinalIgnoreCase)) return NoteKind.Capture;
+        if (Has(app, ["SecHealthUI", "Defender", "SecurityCenter"])) return NoteKind.Security;
+        if (app.Contains("WindowsUpdate", StringComparison.OrdinalIgnoreCase)) return NoteKind.Update;
+        if (Has(app, ["WindowsStore", "AppInitiatedDownload"])) return NoteKind.Store;
         if (app.Contains("G HUB", StringComparison.OrdinalIgnoreCase) || app.Contains("logitech", StringComparison.OrdinalIgnoreCase))
             return text.Contains("DPI", StringComparison.OrdinalIgnoreCase) || Number().IsMatch(text) ? NoteKind.Dpi : NoteKind.Generic;
         if (app.Contains("snip", StringComparison.OrdinalIgnoreCase) || app.Contains("ScreenSketch", StringComparison.OrdinalIgnoreCase) || text.Contains("screenshot", StringComparison.OrdinalIgnoreCase))
             return NoteKind.Screenshot;
         if (CallText().IsMatch(text)) return NoteKind.Call;
         if (Has(app, Messengers)) return NoteKind.Message;
-        if (app.Contains("calendar", StringComparison.OrdinalIgnoreCase) || app.Contains("outlook", StringComparison.OrdinalIgnoreCase) && CalendarText().IsMatch(text)) return NoteKind.Calendar;
+        if (app.Contains("calendar", StringComparison.OrdinalIgnoreCase) || app.Contains("Todos", StringComparison.OrdinalIgnoreCase) || app.Contains("outlook", StringComparison.OrdinalIgnoreCase) && CalendarText().IsMatch(text)) return NoteKind.Calendar;
         if (Has(app, Mailers)) return NoteKind.Mail;
         if (Has(app, Browsers)) return NoteKind.Web;
         if (CalendarText().IsMatch(n.Title)) return NoteKind.Calendar;
@@ -57,6 +63,8 @@ static partial class NotificationView
         NoteKind.Call => 132,
         NoteKind.Screenshot => n.Thumb is null ? 120 : 214,
         NoteKind.Calendar => 140,
+        NoteKind.Alarm => 132,
+        NoteKind.Security or NoteKind.Update or NoteKind.Store or NoteKind.Capture => 136,
         _ => 168,
     };
 
@@ -112,7 +120,9 @@ static partial class NotificationView
         float x = (float)r.X, y = (float)r.Y, w = (float)r.Width, h = (float)r.Height;
         var kind = KindOf(n);
         float icon = 40 * s;
-        Icon(ds, n, new Rect(x + 16 * s, y + (h - icon) / 2, icon, icon), a, kind is NoteKind.Message or NoteKind.Call);
+        var iconRect = new Rect(x + 16 * s, y + (h - icon) / 2, icon, icon);
+        if (Badge(n) is { } badge) DrawBadge(ds, iconRect, s, badge, a, kind == NoteKind.Alarm);
+        else Icon(ds, n, iconRect, a, kind is NoteKind.Message or NoteKind.Call);
         float tx = x + 70 * s, tw = w - 86 * s;
         using var title = Format(15 * s, FontWeights.SemiBold);
         using var body = Format(13 * s, FontWeights.Normal);
@@ -142,10 +152,12 @@ static partial class NotificationView
         // Header shared by every design: small icon, app name, time.
         if (kind is not (NoteKind.Call or NoteKind.Dpi))
         {
-            Icon(ds, n, new Rect(x + pad, y + 14 * s, 22 * s, 22 * s), a, false);
+            bool badge = Badge(n) is not null; // built-in apps: the big glyph badge below stands in for the icon
+            if (!badge) Icon(ds, n, new Rect(x + pad, y + 14 * s, 22 * s, 22 * s), a, false);
+            float hx = badge ? 4 * s : 30 * s;
             using var app = Format(12 * s, FontWeights.Medium, v: CanvasVerticalAlignment.Center);
             string site = kind == NoteKind.Web ? SplitSite(n).Site : "";
-            ds.DrawText($"{n.App}{(site.Length > 0 ? "  ·  " + site : "")}  ·  {When(n)}", new Rect(x + pad + 30 * s, y + 13 * s, tw - 30 * s, 24 * s), White(0.47f * a), app);
+            ds.DrawText($"{n.App}{(site.Length > 0 ? "  ·  " + site : "")}  ·  {When(n)}", new Rect(x + pad + hx, y + 13 * s, tw - hx, 24 * s), White(0.47f * a), app);
         }
         float top = y + 46 * s, bottom = (float)r.Bottom - 14 * s;
 
@@ -216,6 +228,47 @@ static partial class NotificationView
                 else ds.DrawText(n.Body.Length > 0 ? n.Body.Replace('\n', ' ') : "Click to open", new Rect(x + pad, top + 26 * s, tw, 20 * s), White(0.6f * a), Format(13 * s, FontWeights.Normal));
                 break;
             }
+            case NoteKind.Alarm: // Clock: ringing badge, the time large, the alarm or timer name
+            {
+                var b = Badge(n)!.Value;
+                float bs = 56 * s, by = top + 2 * s;
+                DrawBadge(ds, new Rect(x + pad, by, bs, bs), s, b, a, ringing: true);
+                float tx = x + pad + bs + 20 * s, cw = tw - bs - 20 * s;
+                bool timer = Says(n, "timer|計時");
+                var lines = $"{n.Title}\n{n.Body}".Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Where(l => !Regex.IsMatch(l, "time's up|time is up|時間到", RegexOptions.IgnoreCase)).ToArray();
+                string time = lines.Select(l => Clock().Match(l)).FirstOrDefault(m => m.Success)?.Value ?? (timer ? "Time's up" : DateTime.Now.ToString("HH:mm"));
+                string label = lines.FirstOrDefault(l => !Clock().IsMatch(l)) ?? n.App;
+                string detail = string.Join("  ·  ", lines.Where(l => l != label && !Clock().IsMatch(l)));
+                using var big = Format(30 * s, FontWeights.SemiBold);
+                using var name = Format(14 * s, FontWeights.SemiBold);
+                using var sub = Format(12.5f * s, FontWeights.Normal);
+                Fonts.DrawTabular(ds, time, new Rect(tx, by - 8 * s, cw, 40 * s), White(a), big);
+                ds.DrawText(label, new Rect(tx, by + 32 * s, cw, 20 * s), Tint(b.Color, a), name);
+                ds.DrawText(detail.Length > 0 ? detail : "Click to open Clock", new Rect(tx, by + 52 * s, cw, 18 * s), White(0.55f * a), sub);
+                break;
+            }
+            case NoteKind.Security or NoteKind.Update or NoteKind.Store or NoteKind.Capture: // system apps: glyph badge, title, text, a status chip
+            {
+                var b = Badge(n)!.Value;
+                float bs = 48 * s;
+                DrawBadge(ds, new Rect(x + pad, top + 2 * s, bs, bs), s, b, a, false);
+                float tx = x + pad + bs + 14 * s, cw = tw - bs - 14 * s;
+                using var title = Format(15 * s, FontWeights.SemiBold);
+                using var text = Format(13 * s, FontWeights.Normal, wrap: true);
+                ds.DrawText(n.Title.Length > 0 ? n.Title : n.App, new Rect(tx, top, cw, 22 * s), White(a), title);
+                float chipH = b.Chip.Length > 0 ? 24 * s : 0;
+                Block(ds, n.Body, new Rect(tx, top + 24 * s, cw, bottom - top - 24 * s - (chipH > 0 ? chipH + 8 * s : 0)), White(0.65f * a), text);
+                if (chipH > 0)
+                {
+                    using var chip = Format(12 * s, FontWeights.SemiBold, h: CanvasHorizontalAlignment.Center, v: CanvasVerticalAlignment.Center);
+                    using var tl = new CanvasTextLayout(ds, b.Chip, chip, cw, chipH);
+                    var cr = new Rect(tx, bottom - chipH, (float)tl.LayoutBounds.Width + 22 * s, chipH);
+                    ds.FillRoundedRectangle(cr, chipH / 2, chipH / 2, Tint(b.Color, 0.22f * a));
+                    ds.DrawText(b.Chip, cr, Tint(b.Color, a), chip);
+                }
+                break;
+            }
             case NoteKind.Dpi: // G HUB: mouse glyph, big DPI value
             {
                 var logi = ColorHelper.FromArgb(255, 0, 184, 252);
@@ -243,6 +296,52 @@ static partial class NotificationView
                 break;
             }
         }
+    }
+
+    // ---------------------------------------------------------------- built-in Windows apps
+
+    /// <summary>A Segoe Fluent Icons glyph in the app's colour, and an optional status chip for the card.</summary>
+    readonly record struct BadgeInfo(string Glyph, Color Color, string Chip);
+
+    static bool Says(IslandNotification n, string pattern) => Regex.IsMatch($"{n.Title}\n{n.Body}", pattern, RegexOptions.IgnoreCase);
+
+    static readonly Color Amber = ColorHelper.FromArgb(255, 255, 170, 60);
+
+    /// <summary>The glyph badge that stands in for the app icon on built-in Windows apps (system toasts often have no logo).</summary>
+    static BadgeInfo? Badge(IslandNotification n) => KindOf(n) switch
+    {
+        NoteKind.Alarm => Says(n, "timer|計時") ? new("\uE916", Amber, "")
+                        : Says(n, "focus|專注") ? new("\uE823", ColorHelper.FromArgb(255, 170, 140, 255), "")
+                        : new("\uEA8F", Amber, ""),
+        NoteKind.Security => Says(n, "threat|found|quarantin|blocked|action|attention|威脅|封鎖|需要")
+                        ? new("\uEA18", ColorHelper.FromArgb(255, 255, 95, 85), "Action needed")
+                        : new("\uEA18", ColorHelper.FromArgb(255, 80, 210, 130), "Protected"),
+        NoteKind.Update => new("\uE895", ColorHelper.FromArgb(255, 90, 160, 255), Says(n, "restart|reboot|重新啟動|重新開機") ? "Restart required" : ""),
+        NoteKind.Store => new("\uE719", ColorHelper.FromArgb(255, 130, 150, 255), Says(n, "install|安裝") ? "Installed" : Says(n, "update|更新") ? "Updated" : ""),
+        NoteKind.Capture => Says(n, "clip|record|錄製|剪輯")
+                        ? new("\uE714", ColorHelper.FromArgb(255, 255, 85, 85), "Clip saved")
+                        : new("\uE722", ColorHelper.FromArgb(255, 90, 200, 110), "Screenshot saved"),
+        _ => null,
+    };
+
+    /// <summary>Tinted circle with the glyph; a ringing badge sends out slow ripples and shakes like a bell.</summary>
+    static void DrawBadge(CanvasDrawingSession ds, Rect r, float s, BadgeInfo b, float a, bool ringing)
+    {
+        float cx = (float)(r.X + r.Width / 2), cy = (float)(r.Y + r.Height / 2), rad = (float)r.Width / 2;
+        double t = DateTime.Now.TimeOfDay.TotalSeconds;
+        if (ringing)
+            for (int i = 0; i < 2; i++)
+            {
+                float p = (float)((t / 1.4 + i * 0.5) % 1);
+                ds.DrawCircle(cx, cy, rad + 2 * s + p * 12 * s, Tint(b.Color, (1 - p) * 0.45f * a), 2 * s);
+            }
+        ds.FillCircle(cx, cy, rad, Tint(b.Color, 0.22f * a));
+        ds.DrawCircle(cx, cy, rad - 0.5f * s, Tint(b.Color, 0.35f * a), 1 * s);
+        using var glyph = new CanvasTextFormat { FontFamily = "Segoe Fluent Icons", FontSize = rad * 0.95f, HorizontalAlignment = CanvasHorizontalAlignment.Center, VerticalAlignment = CanvasVerticalAlignment.Center };
+        var old = ds.Transform;
+        if (ringing) ds.Transform = Matrix3x2.CreateRotation(0.22f * MathF.Sin((float)t * 18) * MathF.Max(0, MathF.Sin((float)t * 2.2f)), new Vector2(cx, cy - rad * 0.4f)) * old; // bursts of bell shake
+        ds.DrawText(b.Glyph, r, Tint(b.Color, a), glyph);
+        ds.Transform = old;
     }
 
     /// <summary>"in 10 min" for a time later today found in the text, else "".</summary>
