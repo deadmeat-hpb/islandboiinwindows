@@ -263,7 +263,7 @@ static partial class NotificationView
                 float tx = x + pad + bs + 20 * s, cw = tw - bs - 20 * s;
                 bool timer = Says(n, "timer|計時");
                 var lines = $"{n.Title}\n{n.Body}".Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                    .Where(l => !Regex.IsMatch(l, "time's up|time is up|時間到", RegexOptions.IgnoreCase)).ToArray();
+                    .Where(l => !Regex.IsMatch(l, "time's up|time is up|timer done|時間到", RegexOptions.IgnoreCase)).ToArray(); // the big line already says it
                 string time = lines.Select(l => Clock().Match(l)).FirstOrDefault(m => m.Success)?.Value ?? (timer ? "Time's up" : DateTime.Now.ToString("HH:mm"));
                 string label = lines.FirstOrDefault(l => !Clock().IsMatch(l)) ?? n.App;
                 string detail = string.Join("  ·  ", lines.Where(l => l != label && !Clock().IsMatch(l)));

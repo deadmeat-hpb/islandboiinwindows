@@ -66,7 +66,7 @@ sealed class NotificationSource(CanvasDevice device)
 
     async Task<IslandNotification> Read(UserNotification n)
     {
-        var texts = n.Notification?.Visual?.GetBinding(KnownNotificationBindings.ToastGeneric)?.GetTextElements().Select(t => t.Text).ToList() ?? [];
+        var texts = n.Notification?.Visual?.GetBinding(KnownNotificationBindings.ToastGeneric)?.GetTextElements().Select(t => Readable(t.Text)).Where(t => t.Length > 0).ToList() ?? [];
         CanvasBitmap? icon = null;
         try
         {
@@ -81,6 +81,20 @@ sealed class NotificationSource(CanvasDevice device)
         var note = new IslandNotification(n.AppInfo?.DisplayInfo?.DisplayName ?? "", texts.FirstOrDefault() ?? "", string.Join("\n", texts.Skip(1)), icon, appId, accent, DateTime.Now);
         if (NotificationView.KindOf(note) == NoteKind.Screenshot) note = note with { Thumb = await ClipboardImage() };
         return note;
+    }
+
+    /// <summary>
+    /// Some apps (Clock) put unresolved resource keys in their toasts, e.g. "ms-resource:TimerDoneText", which only the app
+    /// itself can translate. Turn the key into words: "Timer done". Ordinary text passes through.
+    /// </summary>
+    internal static string Readable(string? text)
+    {
+        text = text?.Trim() ?? "";
+        if (!text.StartsWith("ms-resource:", StringComparison.OrdinalIgnoreCase)) return text;
+        string key = text["ms-resource:".Length..].Split('/', '\\').Last();
+        key = System.Text.RegularExpressions.Regex.Replace(key, "(Text|String|Label|Title|Message)$", "");
+        var words = System.Text.RegularExpressions.Regex.Replace(key, "(?<=[a-z0-9])(?=[A-Z])|_", " ").Trim().ToLowerInvariant();
+        return words.Length == 0 ? "" : char.ToUpperInvariant(words[0]) + words[1..];
     }
 
     /// <summary>The image on the clipboard (Win+Shift+S puts the snip there), scaled down, or null.</summary>

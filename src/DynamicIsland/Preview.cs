@@ -26,7 +26,7 @@ static class Preview
     static IEnumerable<(string Name, IslandNotification Note)> Samples() =>
     [
         ("clock-alarm", new IslandNotification("Clock", "Wake up", "07:30\nAlarm", null, "Microsoft.WindowsAlarms_8wekyb3d8bbwe!App", At: DateTime.Now)),
-        ("clock-timer", new IslandNotification("Clock", "Timer", "Pasta\nTime's up", null, "Microsoft.WindowsAlarms_8wekyb3d8bbwe!App", At: DateTime.Now)),
+        ("clock-timer", new IslandNotification("Clock", NotificationSource.Readable("ms-resource:TimerDoneText"), "3 分鐘", null, "Microsoft.WindowsAlarms_8wekyb3d8bbwe!App", At: DateTime.Now)), // what Clock actually sends
         ("security-ok", new IslandNotification("Windows Security", "Virus & threat protection", "Quick scan finished. No current threats.", null, "Windows.Defender.SecurityCenter", At: DateTime.Now)),
         ("security-threat", new IslandNotification("Windows Security", "Threats found", "Microsoft Defender Antivirus found threats. Get details.", null, "Windows.Defender.SecurityCenter", At: DateTime.Now)),
         ("update", new IslandNotification("Windows Update", "Restart to finish updating", "Your device will restart outside active hours.", null, "Windows.SystemToast.WindowsUpdate.MoNotification2", At: DateTime.Now)),
