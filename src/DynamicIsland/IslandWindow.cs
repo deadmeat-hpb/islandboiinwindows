@@ -288,7 +288,7 @@ public sealed class IslandWindow : Window
         if (now - _lastFullscreenCheck > 1 && _flow?.IsPlaying != true) // fullscreen games, videos and presentations: never hide, just stay the idle bar (our own flow overlay doesn't count)
         {
             _lastFullscreenCheck = now;
-            _fullscreen = Native.SHQueryUserNotificationState(out int state) == 0 && state is 2 or 3 or 4;
+            _fullscreen = Native.SHQueryUserNotificationState(out int state) == 0 && state is 2 or 3 or 4 && !SnippingInFront();
         }
         if (_fullscreen && _mode != Mode.Idle) { _pinned = false; SetMode(Mode.Idle); }
 
@@ -326,6 +326,21 @@ public sealed class IslandWindow : Window
     }
 
     /// <summary>Moves the canvas only when the island nears its edge, so it rarely moves mid-animation.</summary>
+    /// <summary>
+    /// True while the Snipping Tool overlay (Win+Shift+S, PrtScn) is in front: it covers the screen, so Windows reports
+    /// "full screen", but it isn't a game or video, and treating it as one closed the screenshot pill halfway out.
+    /// </summary>
+    static bool SnippingInFront()
+    {
+        try
+        {
+            Native.GetWindowThreadProcessId(Native.GetForegroundWindow(), out uint pid);
+            using var p = System.Diagnostics.Process.GetProcessById((int)pid);
+            return p.ProcessName is "ScreenClippingHost" or "SnippingTool" or "ScreenSketch";
+        }
+        catch { return false; }
+    }
+
     void FollowIsland()
     {
         var (cx, _, w, _) = Shape();
@@ -417,6 +432,7 @@ public sealed class IslandWindow : Window
         _detail = false;
         if (_notes.Pending.TryDequeue(out var next))
         {
+            _lastFullscreenCheck = 0; // re-check now: the full-screen state may be a second old (e.g. the snip overlay just closed)
             (_note, _noteUntil) = (next, now + (NotificationView.KindOf(next) == NoteKind.Alarm ? 30 : 5)); // a ringing alarm stays until clicked, dismissed or 30 s
             SetMode(Mode.Notify);
             _w.Velocity += 600 * _s; // arrival bounce

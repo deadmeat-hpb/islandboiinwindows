@@ -27,6 +27,7 @@ static class Native
     [DllImport("user32.dll")] public static extern bool ShowWindow(nint hwnd, int cmd);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(nint hwnd);
     [DllImport("user32.dll")] public static extern bool IsIconic(nint hwnd);
+    [DllImport("user32.dll")] public static extern nint GetForegroundWindow();
     [DllImport("shell32.dll")] public static extern int SHQueryUserNotificationState(out int state); // 2 busy/fullscreen, 3 D3D fullscreen, 4 presentation
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern int GetApplicationUserModelId(nint process, ref uint length, System.Text.StringBuilder? id);
     [DllImport("user32.dll")] public static extern nint MonitorFromPoint(POINT pt, uint flags);
