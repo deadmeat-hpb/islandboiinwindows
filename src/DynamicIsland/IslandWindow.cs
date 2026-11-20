@@ -852,7 +852,7 @@ public sealed class IslandWindow : Window
             if (hudEvent is not null)
             {
                 if (_detail) { if (cardAlpha > 0) HudView.DrawExpanded(ds, rect, _s, hudEvent, cardAlpha, _system, _outputs); }
-                else if (hudAlpha > 0 && _h.Value < 40 * _s) HudView.Draw(ds, rect, _s, hudEvent, hudAlpha);
+                else if (hudAlpha > 0 && _h.Value < (hudEvent.Text.Length > 0 ? 66 : 40) * _s) HudView.Draw(ds, rect, _s, hudEvent, hudAlpha); // notice pills are 58 tall: a 40 cap left Bluetooth, Wi-Fi and battery pills empty
             }
             if (clockAlpha > 0) DrawClock(ds, rect, clockAlpha);
             else if (handOver < 1) // the clock leaving into the pill

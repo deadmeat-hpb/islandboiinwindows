@@ -147,6 +147,7 @@ sealed class SystemHud(DispatcherQueue ui)
     }
 
     readonly Dictionary<string, (string Name, Guid Container)> _btInfo = [];
+    readonly Dictionary<Guid, DateTime> _btAnnounced = [];
 
     async void OnBluetooth(string id, string? name, IReadOnlyDictionary<string, object> props)
     {
@@ -156,13 +157,16 @@ sealed class SystemHud(DispatcherQueue ui)
 
         async Task OnBluetoothCore(string id, string? name, IReadOnlyDictionary<string, object> props)
     {
-        if (name is not null) _btInfo[id] = (name, props.TryGetValue("System.Devices.Aep.ContainerId", out var c) && c is Guid g ? g : Guid.Empty);
+        if (name is not null) _btInfo[id] = (string.IsNullOrWhiteSpace(name) ? "Bluetooth device" : name, props.TryGetValue("System.Devices.Aep.ContainerId", out var c) && c is Guid g ? g : Guid.Empty);
         if (!props.TryGetValue("System.Devices.Aep.IsConnected", out var v) || v is not bool connected) return;
         bool was = _btConnected.GetValueOrDefault(id);
         _btConnected[id] = connected;
         // Added only records the starting state; a later false→true update is a real connect. (Waiting for EnumerationCompleted
         // instead ignored connects for ~30 s after launch: that is how long the Bluetooth endpoint scan takes.)
         if (name is not null || !connected || was || !_btInfo.TryGetValue(id, out var info)) return;
+        // A headset has a classic and an LE endpoint in one container; both report connecting. Announce it once.
+        if (info.Container != Guid.Empty && _btAnnounced.TryGetValue(info.Container, out var at) && DateTime.Now - at < TimeSpan.FromSeconds(10)) return;
+        _btAnnounced[info.Container] = DateTime.Now;
 
         int? battery = await BatteryOf(info.Container);
         Raise(new("\uE702", battery is int b ? b / 100f : -1, battery is int p ? $"{p}%" : "", info.Name, BluetoothBlue, 5, "ms-settings:bluetooth", HudKind.Bluetooth));
