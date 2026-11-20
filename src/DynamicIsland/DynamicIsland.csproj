@@ -12,6 +12,7 @@
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <EnableMsixTooling>true</EnableMsixTooling> <!-- lets dotnet build find the PRI tasks without Visual Studio -->
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection> <!-- no background GC thread: the island allocates little -->
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>

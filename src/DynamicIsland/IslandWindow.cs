@@ -303,9 +303,12 @@ public sealed class IslandWindow : Window
         bool animating = _leaving || !_stack.Settled || !_stackW.Settled || !_stackH.Settled || HudView.Drag is not null || _pressed || now - _pulseAt < 0.9 || now - _clockOutAt < ClockOutTime || now - _reachAt < 0.3 || _media.TransitionT < 1 || _media.ArtFadeT < 1 || !(_x.Settled && _w.Settled && _h.Settled && _top.Settled);
         SetFast(animating);
 
-        // Background refraction only refreshes at the slow tick rate when idle, and freezes in battery saver.
-        // Each background refresh costs a full redraw; the idle bar is thin, so 4 Hz is enough there.
-        bool captureDue = animating || (_mode != Mode.Idle || now - _lastCapture > 0.25) && PowerManager.EnergySaverStatus != EnergySaverStatus.On;
+        // Background refraction: each refresh copies a screen band and forces a full redraw, so it's rationed.
+        // 30 Hz while the island moves, 4 Hz for an open pill or card, 1 Hz for the thin smoked idle bar; half that on battery,
+        // frozen in energy saver.
+        bool battery = PowerManager.PowerSupplyStatus == PowerSupplyStatus.NotPresent && PowerManager.BatteryStatus != BatteryStatus.NotPresent;
+        double captureEvery = (animating ? 1 / 30.0 : _mode is Mode.Idle or Mode.Hover ? 1.0 : 0.25) * (battery ? 2 : 1);
+        bool captureDue = now - _lastCapture >= captureEvery - 0.004 && PowerManager.EnergySaverStatus != EnergySaverStatus.On;
         if (captureDue && _capture?.TryUpdate() == true) { _dirty = true; _lastCapture = now; }
         bool playing = _media.Playing && (_mode is Mode.Compact or Mode.Expanded || _stack.Value > 2 * _s) || _mode == Mode.Expanded && (MediaView.TitleScrolls || MediaView.LyricsAnimating(_clock.Elapsed.TotalSeconds));
         if (playing) _dirty = true; // waveform, progress bar and scrolling title move
