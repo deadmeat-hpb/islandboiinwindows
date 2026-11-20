@@ -223,7 +223,7 @@ public sealed class IslandWindow : Window
             Mode.Notify when _detail && _note is not null => (NotificationView.CardW * _s, NotificationView.CardH(_note) * _s, 8 * _s),
             Mode.Hud when _detail && _hud is not null => (HudView.CardW * _s, HudView.CardH(_hud, _outputs.Count) * _s, 8 * _s),
             Mode.Notify => (360 * _s, 72 * _s, 8 * _s),
-            Mode.Hud => ((_hud?.Text.Length > 0 ? 300 : 240) * _s, 32 * _s, 6 * _s), // notices are wider than level bars
+            Mode.Hud => _hud?.Text.Length > 0 ? (330 * _s, 58 * _s, 8 * _s) : (240 * _s, 32 * _s, 6 * _s), // notices (battery, Bluetooth, Wi-Fi) are pills with a badge; level bars stay slim
             _ when _media.HasSession => (400 * _s, 150 * _s, 10 * _s),
             _ => (340 * _s, 96 * _s, 10 * _s),
         };

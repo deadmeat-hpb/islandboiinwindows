@@ -31,6 +31,7 @@ sealed class SystemHud(DispatcherQueue ui)
 {
     const string BatteryKey = "{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2"; // Bluetooth device battery %, where the device reports it
     static readonly Windows.UI.Color Green = ColorHelper.FromArgb(255, 80, 220, 120), Red = ColorHelper.FromArgb(255, 255, 90, 80);
+    internal static readonly Windows.UI.Color BluetoothBlue = ColorHelper.FromArgb(255, 70, 140, 255), WifiBlue = ColorHelper.FromArgb(255, 90, 170, 255);
 
     MMDevice? _speakers; // kept alive so the volume callback keeps firing
     MMDeviceEnumerator? _devices;
@@ -125,7 +126,7 @@ sealed class SystemHud(DispatcherQueue ui)
         if (name is not null || !connected || was || !_btInfo.TryGetValue(id, out var info)) return;
 
         int? battery = await BatteryOf(info.Container);
-        Raise(new("\uE702", battery is int b ? b / 100f : -1, battery is int p ? $"{p}%" : "", info.Name, Seconds: 5, Settings: "ms-settings:bluetooth", Kind: HudKind.Bluetooth));
+        Raise(new("\uE702", battery is int b ? b / 100f : -1, battery is int p ? $"{p}%" : "", info.Name, BluetoothBlue, 5, "ms-settings:bluetooth", HudKind.Bluetooth));
     }
 
     /// <summary>Battery % from the device node that shares the endpoint's container, if the device reports one.</summary>
@@ -150,7 +151,7 @@ sealed class SystemHud(DispatcherQueue ui)
         if (ssid == _ssid) return;
         bool announce = _ssid is not null && !string.IsNullOrEmpty(ssid); // skip the very first check and disconnects
         _ssid = ssid ?? "";
-        if (announce) Raise(new("\uE701", (profile!.GetSignalBars() ?? 0) / 5f, "", ssid!, Seconds: 2.5, Settings: "ms-settings:network-wifi", Kind: HudKind.Wifi));
+        if (announce) Raise(new("\uE701", (profile!.GetSignalBars() ?? 0) / 5f, "", ssid!, WifiBlue, 2.5, "ms-settings:network-wifi", HudKind.Wifi));
     }
 
     // ---- Controls used by the expanded cards ----
@@ -244,14 +245,13 @@ static class HudView
     {
         HudKind.Volume => 96 + 28 * Rows(outputs) + (outputs > 0 ? 8 : 0),
         HudKind.Brightness => 96,
-        HudKind.Power => 128,
-        _ => 116,
+        _ => 150, // power, Bluetooth, Wi-Fi: badge header, a large value with its gauge, the settings button
     };
 
     static Rect Slider(Rect r, float s) => new(r.X + 20 * s, r.Y + 66 * s, r.Width - 92 * s, 8 * s);
     static Rect Icon(Rect r, float s) => new(r.X + 14 * s, r.Y + 14 * s, 36 * s, 36 * s);
     static Rect Row(Rect r, float s, int i) => new(r.X + 14 * s, r.Y + 92 * s + i * 28 * s, r.Width - 28 * s, 26 * s);
-    static Rect Button(Rect r, float s) => new(r.Right - 132 * s, r.Bottom - 42 * s, 118 * s, 28 * s);
+    static Rect Button(Rect r, float s) => new(r.Right - 148 * s, r.Bottom - 42 * s, 134 * s, 28 * s);
 
     /// <summary>What a click at <paramref name="p"/> on the expanded card hits: "mute", "slider", "out:N", "settings" or null.</summary>
     public static string? Hit(Rect r, float s, HudEvent e, int outputs, System.Numerics.Vector2 p)
@@ -283,6 +283,7 @@ static class HudView
         using var sub = new CanvasTextFormat { FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.Normal), FontSize = 12 * s, WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character };
         using var value = new CanvasTextFormat { FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.SemiBold), FontSize = 13 * s, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = CanvasHorizontalAlignment.Right, VerticalAlignment = CanvasVerticalAlignment.Center };
 
+        if (e.Kind is HudKind.Power or HudKind.Bluetooth or HudKind.Wifi) { DrawNoticeCard(ds, r, s, e, a); return; }
         var icon = Icon(r, s);
         bool muted = e.Kind == HudKind.Volume && hud?.Muted == true;
         ds.FillCircle((float)(icon.X + icon.Width / 2), (float)(icon.Y + icon.Height / 2), 18 * s, muted ? W(0.10f) : T(0.22f));
@@ -315,44 +316,114 @@ static class HudView
                 return;
             }
             case HudKind.Power:
+            case HudKind.Bluetooth:
+            case HudKind.Wifi:
+                DrawNoticeCard(ds, r, s, e, a);
+                return;
+        }
+    }
+
+    /// <summary>
+    /// Battery, Bluetooth and Wi-Fi cards, in the same style as the built-in app notifications: a tinted glyph badge with a
+    /// title and status, then the value large beside its gauge (battery capsule, or signal bars), and the settings button.
+    /// </summary>
+    static void DrawNoticeCard(CanvasDrawingSession ds, Rect r, float s, HudEvent e, float a)
+    {
+        Color W(float al) => ColorHelper.FromArgb((byte)Math.Clamp(al * 255 * a, 0, 255), 255, 255, 255);
+        var c = e.Tint ?? ColorHelper.FromArgb(255, 150, 180, 255);
+        float x = (float)r.X, y = (float)r.Y, pad = 18 * s, bs = 44 * s;
+        bool charging = e.Kind == HudKind.Power && (PowerManager.BatteryStatus == BatteryStatus.Charging || PowerManager.PowerSupplyStatus == PowerSupplyStatus.Adequate);
+        Badge(ds, new Rect(x + pad, y + 16 * s, bs, bs), s, e.Glyph, c, a, pulse: charging);
+
+        string title = e.Kind switch
+        {
+            HudKind.Power => charging ? "Charging" : e.Text.Length > 0 ? e.Text : "On battery",
+            _ => e.Text,
+        };
+        string status = e.Kind switch
+        {
+            HudKind.Power => PowerEstimate(charging),
+            HudKind.Bluetooth => "Connected",
+            _ => "Connected",
+        };
+        float tx = x + pad + bs + 14 * s, tw = (float)r.Right - pad - tx;
+        using var titleF = Text(15 * s, Microsoft.UI.Text.FontWeights.SemiBold);
+        using var subF = Text(12.5f * s, Microsoft.UI.Text.FontWeights.Normal);
+        ds.DrawText(title, new Rect(tx, y + 17 * s, tw, 22 * s), W(1), titleF);
+        ds.DrawText(status, new Rect(tx, y + 39 * s, tw, 20 * s), W(0.55f), subF);
+
+        // Value row: big number + gauge, left-aligned under the badge; the settings button sits at the right.
+        float rowY = y + 82 * s, rowH = 44 * s;
+        using var big = Text(28 * s, Microsoft.UI.Text.FontWeights.SemiBold, CanvasVerticalAlignment.Center);
+        switch (e.Kind)
+        {
+            case HudKind.Power:
             {
                 int pct = PowerManager.RemainingChargePercent;
-                bool charging = PowerManager.BatteryStatus == BatteryStatus.Charging || PowerManager.PowerSupplyStatus == PowerSupplyStatus.Adequate;
-                ds.DrawText(charging ? "Charging" : e.Text.Length > 0 ? e.Text : "On battery", new Rect(tx, r.Y + 14 * s, tw, 20 * s), W(1), title);
-                ds.DrawText(PowerEstimate(charging), new Rect(tx, r.Y + 34 * s, tw, 18 * s), W(0.55f), sub);
-                using var big = new CanvasTextFormat { FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.SemiBold), FontSize = 30 * s, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = CanvasVerticalAlignment.Center };
-                Fonts.DrawTabular(ds, $"{pct}%", new Rect(r.X + 20 * s, r.Y + 62 * s, 120 * s, 40 * s), W(1), big);
-                var bar = new Rect(r.X + 20 * s, r.Y + 104 * s, r.Width - 172 * s, 6 * s);
-                ds.FillRoundedRectangle(bar, 3 * s, 3 * s, W(0.18f));
-                ds.FillRoundedRectangle(new Rect(bar.X, bar.Y, bar.Width * pct / 100.0, bar.Height), 3 * s, 3 * s, T(0.95f));
-                DrawButton(ds, Button(r, s), s, "Battery settings", a);
-                return;
+                DrawCapsule(ds, new Rect(x + pad, rowY + 12 * s, 52 * s, 22 * s), s, pct / 100f, c, charging, a);
+                Fonts.DrawTabular(ds, $"{pct}%", new Rect(x + pad + 64 * s, rowY, 100 * s, rowH), W(1), big);
+                break;
             }
-            case HudKind.Bluetooth:
-                ds.DrawText(e.Text, new Rect(tx, r.Y + 14 * s, tw, 20 * s), W(1), title);
-                ds.DrawText("Connected", new Rect(tx, r.Y + 34 * s, tw, 18 * s), W(0.55f), sub);
-                if (e.Level >= 0)
-                {
-                    using var big = new CanvasTextFormat { FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.SemiBold), FontSize = 24 * s, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = CanvasVerticalAlignment.Center };
-                    ds.DrawText("", new Rect(r.X + 18 * s, r.Y + 66 * s, 24 * s, 30 * s), W(0.8f), glyph);
-                    Fonts.DrawTabular(ds, e.Value, new Rect(r.X + 46 * s, r.Y + 64 * s, 100 * s, 34 * s), W(1), big);
-                }
-                DrawButton(ds, Button(r, s), s, "Bluetooth settings", a);
-                return;
+            case HudKind.Bluetooth when e.Level >= 0:
+                DrawCapsule(ds, new Rect(x + pad, rowY + 12 * s, 52 * s, 22 * s), s, e.Level, c, false, a);
+                Fonts.DrawTabular(ds, e.Value, new Rect(x + pad + 64 * s, rowY, 100 * s, rowH), W(1), big);
+                break;
+            case HudKind.Bluetooth: // the device doesn't report its battery
+                ds.DrawText("Battery level not reported", new Rect(x + pad, rowY, 170 * s, rowH), W(0.4f), Text(12 * s, Microsoft.UI.Text.FontWeights.Normal, CanvasVerticalAlignment.Center));
+                break;
             case HudKind.Wifi:
             {
-                ds.DrawText(e.Text, new Rect(tx, r.Y + 14 * s, tw, 20 * s), W(1), title);
-                ds.DrawText("Connected", new Rect(tx, r.Y + 34 * s, tw, 18 * s), W(0.55f), sub);
                 int bars = (int)MathF.Round(Math.Clamp(e.Level, 0, 1) * 5);
                 for (int i = 0; i < 5; i++)
                 {
-                    float bh = (8 + i * 5) * s, bx = (float)r.X + 22 * s + i * 9 * s, by = (float)r.Y + 98 * s;
-                    ds.FillRoundedRectangle(bx, by - bh, 5 * s, bh, 2 * s, 2 * s, i < bars ? T(0.95f) : W(0.18f));
+                    float bh = (8 + i * 6) * s, bx = x + pad + i * 11 * s, by = rowY + 38 * s;
+                    ds.FillRoundedRectangle(bx, by - bh, 7 * s, bh, 2.5f * s, 2.5f * s, i < bars ? Tint(c, a) : W(0.16f));
                 }
-                DrawButton(ds, Button(r, s), s, "Wi-Fi settings", a);
-                return;
+                ds.DrawText(Signal(e.Level), new Rect(x + pad + 64 * s, rowY, 130 * s, rowH), W(1), Text(22 * s, Microsoft.UI.Text.FontWeights.SemiBold, CanvasVerticalAlignment.Center));
+                break;
             }
         }
+        DrawButton(ds, Button(r, s), s, e.Kind switch { HudKind.Power => "Battery settings", HudKind.Bluetooth => "Bluetooth settings", _ => "Wi-Fi settings" }, a);
+    }
+
+    static string Signal(float level) => level switch { >= 0.8f => "Excellent", >= 0.6f => "Strong", >= 0.4f => "Good", _ => "Weak" };
+
+    static Color Tint(Color c, float a) => ColorHelper.FromArgb((byte)Math.Clamp(a * 255, 0, 255), c.R, c.G, c.B);
+
+    static CanvasTextFormat Text(float size, Windows.UI.Text.FontWeight weight, CanvasVerticalAlignment v = CanvasVerticalAlignment.Top) => new()
+    {
+        FontFamily = Fonts.Inter(weight), FontSize = size, FontWeight = weight, VerticalAlignment = v,
+        WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character, TrimmingSign = CanvasTrimmingSign.Ellipsis,
+    };
+
+    /// <summary>Tinted circle with the glyph (as on the built-in app notifications); <paramref name="pulse"/> breathes it while charging.</summary>
+    static void Badge(CanvasDrawingSession ds, Rect r, float s, string glyph, Color c, float a, bool pulse)
+    {
+        float cx = (float)(r.X + r.Width / 2), cy = (float)(r.Y + r.Height / 2), rad = (float)r.Width / 2;
+        if (pulse)
+        {
+            float p = (float)(DateTime.Now.TimeOfDay.TotalSeconds / 1.8 % 1);
+            ds.DrawCircle(cx, cy, rad + 2 * s + p * 9 * s, Tint(c, (1 - p) * 0.4f * a), 1.5f * s);
+        }
+        ds.FillCircle(cx, cy, rad, Tint(c, 0.22f * a));
+        ds.DrawCircle(cx, cy, rad - 0.5f * s, Tint(c, 0.35f * a), 1 * s);
+        using var f = new CanvasTextFormat { FontFamily = "Segoe Fluent Icons", FontSize = rad * 0.9f, HorizontalAlignment = CanvasHorizontalAlignment.Center, VerticalAlignment = CanvasVerticalAlignment.Center };
+        ds.DrawText(glyph, r, Tint(c, a), f);
+    }
+
+    /// <summary>A battery capsule: outline, terminal nub, fill to <paramref name="level"/>; a bolt over it while charging.</summary>
+    static void DrawCapsule(CanvasDrawingSession ds, Rect r, float s, float level, Color c, bool charging, float a)
+    {
+        level = Math.Clamp(level, 0, 1);
+        float rad = (float)r.Height * 0.3f, inset = 2.5f * s;
+        var fill = level <= 0.2f && !charging ? ColorHelper.FromArgb(255, 255, 90, 80) : c;
+        ds.DrawRoundedRectangle(r, rad, rad, ColorHelper.FromArgb((byte)(110 * a), 255, 255, 255), 1.5f * s);
+        ds.FillRoundedRectangle((float)r.Right + 2 * s, (float)(r.Y + r.Height * 0.32), 2.5f * s, (float)r.Height * 0.36f, 1 * s, 1 * s, ColorHelper.FromArgb((byte)(110 * a), 255, 255, 255));
+        var inner = new Rect(r.X + inset, r.Y + inset, Math.Max(0, (r.Width - 2 * inset) * level), r.Height - 2 * inset);
+        if (inner.Width > 0) ds.FillRoundedRectangle(inner, rad * 0.6f, rad * 0.6f, Tint(fill, a));
+        if (!charging) return;
+        using var bolt = new CanvasTextFormat { FontFamily = "Segoe Fluent Icons", FontSize = (float)r.Height * 0.75f, HorizontalAlignment = CanvasHorizontalAlignment.Center, VerticalAlignment = CanvasVerticalAlignment.Center };
+        ds.DrawText("\uE945", r, ColorHelper.FromArgb((byte)(255 * a), 255, 255, 255), bolt);
     }
 
     static string PowerEstimate(bool charging)
@@ -393,7 +464,7 @@ static class HudView
             FontFamily = "Segoe Fluent Icons", FontSize = 16 * s,
             HorizontalAlignment = CanvasHorizontalAlignment.Center, VerticalAlignment = CanvasVerticalAlignment.Center,
         };
-        ds.DrawText(e.Glyph, new Rect(x + 8 * s, cy - 14 * s, 28 * s, 28 * s), tint, icon);
+        if (e.Text.Length == 0) ds.DrawText(e.Glyph, new Rect(x + 8 * s, cy - 14 * s, 28 * s, 28 * s), tint, icon); // notices draw a badge instead
         using var label = new CanvasTextFormat
         {
             FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.SemiBold), FontSize = 13 * s, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
@@ -412,20 +483,31 @@ static class HudView
             return;
         }
 
-        // Notice: text on the left, value + level ring on the right.
-        float ringR = 8 * s, ringX = right - ringR;
-        float valueW = e.Value.Length > 0 ? 38 * s : 0, ringW = e.Level >= 0 ? 2 * ringR + 8 * s : 0;
-        ds.DrawText(e.Text, new Rect(left, cy - 12 * s, right - left - valueW - ringW, 24 * s), white, label);
-        if (e.Value.Length > 0)
-            ds.DrawText(e.Value, new Rect(right - ringW - valueW, cy - 12 * s, valueW, 24 * s), white, label);
+        // Notice (battery, Bluetooth, Wi-Fi): glyph badge, name + status, a small gauge on the right.
+        var c = e.Tint ?? ColorHelper.FromArgb(255, 150, 180, 255);
+        bool charging = e.Kind == HudKind.Power && e.Text == "Charging";
+        float bs = 36 * s;
+        Badge(ds, new Rect(x + 12 * s, cy - bs / 2, bs, bs), s, e.Glyph, c, a, pulse: charging);
+        float tx = x + 60 * s, gaugeW = e.Kind == HudKind.Wifi ? 30 * s : e.Level >= 0 ? 74 * s : 0;
+        using var name = Text(13.5f * s, Microsoft.UI.Text.FontWeights.SemiBold);
+        using var status = Text(11.5f * s, Microsoft.UI.Text.FontWeights.Normal);
+        string line = e.Kind switch { HudKind.Power => charging ? "Plugged in" : "Plug in soon", HudKind.Bluetooth => "Connected", _ => $"{Signal(e.Level)} signal" };
+        ds.DrawText(e.Text, new Rect(tx, cy - 18 * s, right - tx - gaugeW - 8 * s, 20 * s), white, name);
+        ds.DrawText(line, new Rect(tx, cy + 1 * s, right - tx - gaugeW - 8 * s, 18 * s), ColorHelper.FromArgb((byte)(150 * a), 255, 255, 255), status);
+        if (e.Kind == HudKind.Wifi)
+        {
+            int bars = (int)MathF.Round(Math.Clamp(e.Level, 0, 1) * 5);
+            for (int i = 0; i < 5; i++)
+            {
+                float bh = (5 + i * 3.5f) * s, bx = right - 30 * s + i * 6 * s;
+                ds.FillRoundedRectangle(bx, cy + 9 * s - bh, 4 * s, bh, 1.5f * s, 1.5f * s, i < bars ? Tint(c, a) : track);
+            }
+            return;
+        }
         if (e.Level < 0) return;
-        ds.DrawCircle(ringX, cy, ringR, track, 2.5f * s);
-        float sweep = MathF.Tau * Math.Clamp(e.Level, 0, 1);
-        using var builder = new CanvasPathBuilder(ds);
-        builder.BeginFigure(ringX, cy - ringR);
-        builder.AddArc(new System.Numerics.Vector2(ringX, cy), ringR, ringR, -MathF.PI / 2, sweep);
-        builder.EndFigure(CanvasFigureLoop.Open);
-        using var arc = CanvasGeometry.CreatePath(builder);
-        ds.DrawGeometry(arc, tint, 2.5f * s, new CanvasStrokeStyle { StartCap = CanvasCapStyle.Round, EndCap = CanvasCapStyle.Round });
+        DrawCapsule(ds, new Rect(right - 30 * s, cy - 7 * s, 26 * s, 14 * s), s, e.Level, c, charging, a);
+        using var pct = Text(13 * s, Microsoft.UI.Text.FontWeights.SemiBold, CanvasVerticalAlignment.Center);
+        pct.HorizontalAlignment = CanvasHorizontalAlignment.Right;
+        Fonts.DrawTabular(ds, e.Value, new Rect(right - 78 * s, cy - 12 * s, 42 * s, 24 * s), white, pct);
     }
 }

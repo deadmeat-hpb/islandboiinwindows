@@ -65,5 +65,32 @@ static class Preview
             using var file = File.Create(Path.Combine(dir, name + ".png"));
             target.SaveAsync(file.AsRandomAccessStream(), CanvasBitmapFileFormat.Png).AsTask().Wait();
         }
+
+        HudEvent[] notices =
+        [
+            new("\uE945", 0.76f, "76%", "Charging", ColorHelper.FromArgb(255, 80, 220, 120), Kind: HudKind.Power),
+            new("\uEBA0", 0.09f, "9%", "Battery low", ColorHelper.FromArgb(255, 255, 90, 80), Kind: HudKind.Power),
+            new("\uE702", 0.8f, "80%", "Galaxy Buds2 Pro", SystemHud.BluetoothBlue, Kind: HudKind.Bluetooth),
+            new("\uE702", -1, "", "MX Master 3S", SystemHud.BluetoothBlue, Kind: HudKind.Bluetooth),
+            new("\uE701", 0.8f, "", "HomeWiFi_5G", SystemHud.WifiBlue, Kind: HudKind.Wifi),
+        ];
+        int k = 0;
+        foreach (var e in notices)
+        {
+            float w = HudView.CardW * s, ch = HudView.CardH(e, 0) * s, ph = 58 * s, gap = 20 * s;
+            using var target = new CanvasRenderTarget(device, w + 40 * s, ph + ch + gap + 40 * s, 96);
+            using (var ds = target.CreateDrawingSession())
+            {
+                ds.Clear(Color.FromArgb(255, 70, 80, 95));
+                var pill = new Rect(20 * s, 20 * s, 330 * s, ph);
+                var card = new Rect(20 * s, pill.Bottom + gap, w, ch);
+                ds.FillRoundedRectangle(pill, 29 * s, 29 * s, Color.FromArgb(235, 22, 22, 24));
+                ds.FillRoundedRectangle(card, 30 * s, 30 * s, Color.FromArgb(235, 22, 22, 24));
+                HudView.Draw(ds, pill, s, e, 1);
+                HudView.DrawExpanded(ds, card, s, e, 1, null, []);
+            }
+            using var file = File.Create(Path.Combine(dir, $"hud-{k++}-{e.Kind}.png".ToLowerInvariant()));
+            target.SaveAsync(file.AsRandomAccessStream(), CanvasBitmapFileFormat.Png).AsTask().Wait();
+        }
     }
 }
