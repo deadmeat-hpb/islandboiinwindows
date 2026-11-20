@@ -24,6 +24,12 @@ sealed class NotificationSource(CanvasDevice device)
 
     public async void Start(DispatcherQueue ui)
     {
+        try { await StartCore(ui); }
+        catch (Exception ex) { Crash.Log("Start", ex); } // async void: an escaping exception would kill the app
+    }
+
+        async Task StartCore(DispatcherQueue ui)
+    {
         WatchScreenshots(ui); // works without notification access
         try
         {
@@ -39,7 +45,7 @@ sealed class NotificationSource(CanvasDevice device)
             // Polling instead of NotificationChanged: that event needs a packaged app; one cheap call a second works everywhere.
             _timer = ui.CreateTimer();
             _timer.Interval = TimeSpan.FromSeconds(1);
-            _timer.Tick += async (_, _) => await Poll();
+            _timer.Tick += async (_, _) => { try { await Poll(); } catch (Exception ex) { Crash.Log("Poll", ex); } };
             _timer.Start();
         }
         catch (Exception ex) { Debug.WriteLine($"Notification listener unavailable: {ex}"); }
@@ -127,8 +133,12 @@ sealed class NotificationSource(CanvasDevice device)
                 await Task.Delay(1500); // let a Snipping Tool toast (polled every second) claim it first, and the file finish writing
                 ui.TryEnqueue(async () =>
                 {
-                    var note = new IslandNotification("Screenshot", "Screenshot saved", $"Saved to {Path.GetFileName(dir)}", null, "Microsoft.ScreenSketch_8wekyb3d8bbwe!App", null, DateTime.Now, await FileImage(e.FullPath), e.FullPath);
-                    if (!DuplicateShot(note)) Pending.Enqueue(note);
+                    try
+                    {
+                        var note = new IslandNotification("Screenshot", "Screenshot saved", $"Saved to {Path.GetFileName(dir)}", null, "Microsoft.ScreenSketch_8wekyb3d8bbwe!App", null, DateTime.Now, await FileImage(e.FullPath), e.FullPath);
+                        if (!DuplicateShot(note)) Pending.Enqueue(note);
+                    }
+                    catch (Exception ex) { Crash.Log("ScreenshotFile", ex); }
                 });
             };
         }

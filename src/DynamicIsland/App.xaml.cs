@@ -10,7 +10,9 @@ public partial class App : Application
     public App()
     {
         InitializeComponent();
-        UnhandledException += (_, e) => { System.Diagnostics.Debug.WriteLine(e.Exception); e.Handled = true; }; // a bad frame shouldn't close the island
+        UnhandledException += (_, e) => { Crash.Log("Unhandled", e.Exception); e.Handled = true; }; // a bad frame shouldn't close the island
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => Crash.Log("Fatal", e.ExceptionObject as Exception);
+        TaskScheduler.UnobservedTaskException += (_, e) => { Crash.Log("Task", e.Exception); e.SetObserved(); };
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)

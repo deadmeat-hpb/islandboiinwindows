@@ -85,6 +85,12 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
 
     public async void Start()
     {
+        try { await StartCore(); }
+        catch (Exception ex) { Crash.Log("Start", ex); } // async void: an escaping exception would kill the app
+    }
+
+        async Task StartCore()
+    {
         try
         {
             _manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
@@ -174,6 +180,12 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
     }
 
     async void RefreshProps()
+    {
+        try { await RefreshPropsCore(); }
+        catch (Exception ex) { Crash.Log("RefreshProps", ex); } // async void: an escaping exception would kill the app
+    }
+
+        async Task RefreshPropsCore()
     {
         var session = _session;
         string title = "", artist = "";

@@ -150,6 +150,12 @@ sealed class SystemHud(DispatcherQueue ui)
 
     async void OnBluetooth(string id, string? name, IReadOnlyDictionary<string, object> props)
     {
+        try { await OnBluetoothCore(id, name, props); }
+        catch (Exception ex) { Crash.Log("OnBluetooth", ex); } // async void: an escaping exception would kill the app
+    }
+
+        async Task OnBluetoothCore(string id, string? name, IReadOnlyDictionary<string, object> props)
+    {
         if (name is not null) _btInfo[id] = (name, props.TryGetValue("System.Devices.Aep.ContainerId", out var c) && c is Guid g ? g : Guid.Empty);
         if (!props.TryGetValue("System.Devices.Aep.IsConnected", out var v) || v is not bool connected) return;
         bool was = _btConnected.GetValueOrDefault(id);

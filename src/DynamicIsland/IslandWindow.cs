@@ -69,7 +69,12 @@ public sealed class IslandWindow : Window
 
         _canvas = new CanvasControl { ClearColor = Colors.Transparent, Width = CanvasDip, HorizontalAlignment = HorizontalAlignment.Left, RenderTransform = _shift };
         // Re-invalidate from Draw while animating: invalidating only from CompositionTarget.Rendering lands every other frame (30 fps on 60 Hz).
-        _canvas.Draw += (_, e) => { Draw(e.DrawingSession); if (_wasAnimating) _canvas.Invalidate(); };
+        _canvas.Draw += (_, e) =>
+        {
+            try { Draw(e.DrawingSession); }
+            catch (Exception ex) { Crash.Log("Draw", ex); } // a bad frame is skipped, never fatal
+            if (_wasAnimating) _canvas.Invalidate();
+        };
         _root = new Grid { Background = new SolidColorBrush(Colors.Transparent), Children = { _canvas } };
         _root.PointerPressed += OnPressed;
         _root.PointerMoved += OnMoved;
@@ -94,10 +99,14 @@ public sealed class IslandWindow : Window
         // Out-of-context WinEvent hook: Windows calls us only on minimize, no polling.
         _minimizeProc = async (_, _, hwnd, idObject, _, _, _) =>
         {
-            if (idObject != 0 || !_media.Playing || _fullscreen) return; // OBJID_WINDOW only
-            if (_mode is not (Mode.Idle or Mode.Hover)) return; // already showing the pill or card: nothing to announce
-            string title = _media.Title;
-            if (await Task.Run(() => _media.Window(title)) == hwnd) FlowIn(); // same window the card's art click brings forward
+            try
+            {
+                if (idObject != 0 || !_media.Playing || _fullscreen) return; // OBJID_WINDOW only
+                if (_mode is not (Mode.Idle or Mode.Hover)) return; // already showing the pill or card: nothing to announce
+                string title = _media.Title;
+                if (await Task.Run(() => _media.Window(title)) == hwnd) FlowIn(); // same window the card's art click brings forward
+            }
+            catch (Exception ex) { Crash.Log("Minimize", ex); }
         };
         Native.SetWinEventHook(Native.EVENT_SYSTEM_MINIMIZESTART, Native.EVENT_SYSTEM_MINIMIZESTART, 0, _minimizeProc, 0, 0, Native.WINEVENT_OUTOFCONTEXT);        _notes.Start(DispatcherQueue);
         var hud = _system = new SystemHud(DispatcherQueue);
@@ -138,6 +147,12 @@ public sealed class IslandWindow : Window
 
     /// <summary>Media just started: light flows from the app's taskbar button into the island, which glows as it lands.</summary>
     async void FlowIn()
+    {
+        try { await FlowInCore(); }
+        catch (Exception ex) { Crash.Log("FlowIn", ex); } // async void: an escaping exception would kill the app
+    }
+
+        async Task FlowInCore()
     {        var (cx, top, _, h) = Shape();
         var to = new System.Numerics.Vector2(_monLeft + cx, _monTop + top + h / 2);
         var from = await Task.Run(() => FlowWindow.TaskbarButton(_media.AppName())) // UI Automation into the taskbar: keep it off the UI thread
@@ -280,6 +295,12 @@ public sealed class IslandWindow : Window
     }
 
     void OnTick(object? sender, object e)
+    {
+        try { Tick(); }
+        catch (Exception ex) { Crash.Log("Tick", ex); }
+    }
+
+    void Tick()
     {
         double now = _clock.Elapsed.TotalSeconds;
         float dt = (float)Math.Min(now - _lastTick, 1 / 30.0);
