@@ -355,10 +355,10 @@ static partial class NotificationView
         _ => null,
     };
 
-    /// <summary>The snip's size on the card in DIPs: card width, at most 170 tall.</summary>
+    /// <summary>The snip's size on the card in DIPs: card width, at most 130 tall (the card must fit the island window).</summary>
     static (float W, float H) ShotSize(CanvasBitmap img)
     {
-        float maxW = CardW - 32, maxH = 170, k = MathF.Min(maxW / (float)img.Size.Width, maxH / (float)img.Size.Height);
+        float maxW = CardW - 32, maxH = 130, k = MathF.Min(maxW / (float)img.Size.Width, maxH / (float)img.Size.Height);
         return ((float)img.Size.Width * k, (float)img.Size.Height * k);
     }
 
