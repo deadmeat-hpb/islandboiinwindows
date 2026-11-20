@@ -39,7 +39,7 @@ static class Glass
         if (glowStrength > 0) DrawGlow(ds, shape, rect, s, glow, glowStrength);
 
         if (background is not null) DrawRefraction(ds, background, shape, rect, r, s, expand);
-        else ds.FillGeometry(shape, Gray(200, 22));
+        else ds.FillGeometry(shape, Gray(255, 6)); // liquid glass off (Settings): a solid black island, nothing shows through
 
         ds.FillGeometry(shape, Gray((int)(16 + 70 * expand + 70 * attach), 12)); // light tint, darker when expanded for legible text; the idle bar is smoked so it reads on any background
         if (glowStrength > 0) // light from the album art spilling into the glass
@@ -54,7 +54,8 @@ static class Glass
         if (washStrength > 0) DrawWash(ds, shape, rect, wash, washStrength);
         if (content is not null)
             using (ds.CreateLayer(1f, shape)) content(rect);
-        DrawRim(ds, shape, rect, r, s, inner: attach == 0);
+        if (background is null) ds.DrawGeometry(shape, White(26), 1f * s); // solid: a faint edge instead of the glass highlights
+        else DrawRim(ds, shape, rect, r, s, inner: attach == 0);
     }
 
     /// <summary>

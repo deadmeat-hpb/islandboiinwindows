@@ -41,7 +41,7 @@ sealed class Settings
     public PowerMode Power { get; set; } = PowerMode.Balanced;
     public bool PauseGlassOnBattery { get; set; }
 
-    public float SizeScale => Size switch { IslandSize.Small => 0.85f, IslandSize.Large => 1.15f, _ => 1f };
+    [System.Text.Json.Serialization.JsonIgnore] public float SizeScale => Size switch { IslandSize.Small => 0.85f, IslandSize.Large => 1.15f, _ => 1f };
 
     public static readonly string Dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DynamicIslandData");
     static readonly string File_ = Path.Combine(Dir, "settings.json");
