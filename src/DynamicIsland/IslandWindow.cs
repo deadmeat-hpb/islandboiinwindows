@@ -118,11 +118,11 @@ public sealed class IslandWindow : Window
                 if (Settings.Current.ClockTimers && Native.WindowAppId(hwnd)?.Contains(ClockActivity.AppId, StringComparison.OrdinalIgnoreCase) == true)
                 {
                     if (await Task.Run(() => ClockActivity.Read(hwnd)) is not { } timer) return;
-                    if (Settings.Current.DropAnimation) FlowIn(timer);
+                    if (Settings.Current.DropAnimation && Settings.Current.Lively) FlowIn(timer);
                     else { _timer = timer; SetMode(RestMode(near: false)); }
                     return;
                 }
-                if (!MediaPlaying || !Settings.Current.DropAnimation) return;
+                if (!MediaPlaying || !Settings.Current.DropAnimation || !Settings.Current.Lively) return;
                 string title = _media.Title;
                 if (await Task.Run(() => _media.Window(title)) == hwnd) FlowIn(); // same window the card's art click brings forward
             }
@@ -236,7 +236,7 @@ public sealed class IslandWindow : Window
 
     // Clock timer or stopwatch living in the island (see ClockActivity); _flowTimer is the one still in flight.
     ClockActivity? _timer, _flowTimer;
-    int _timerSecond = -1;
+    int _timerSecond = -1, _playSecond = -1;
     bool TimerOn => _timer is not null && Settings.Current.ClockTimers;
 
     async Task FlowInCore(ClockActivity? timer)
@@ -262,7 +262,7 @@ public sealed class IslandWindow : Window
                     else _pinned = true;
                     _holdUntil = now + 3; // the mouse is down at the taskbar: keep the pill up a moment before the idle rule takes it back
                     SetMode(Mode.Compact);
-                    _w.Velocity += 400 * _s; // a little liquid wobble in width only: it lands as the pill, never swelling past it
+                    if (Settings.Current.Lively) _w.Velocity += 400 * _s; // a little liquid wobble in width only: it lands as the pill, never swelling past it
                     _artInAt = now;
                 }
                 _dirty = true;
@@ -380,6 +380,7 @@ public sealed class IslandWindow : Window
     (float cx, float top, float w, float h) Shape()
     {
         if (_mode is Mode.Expanded or Mode.Notify || _detail) return (_x.Value, _top.Value, MathF.Max(_w.Value, 1), MathF.Max(_h.Value, 1)); // cards keep their size while moving
+        if (!Settings.Current.Lively) return (_x.Value, _top.Value, MathF.Max(_w.Value, 1), MathF.Max(_h.Value, 1)); // Animations: no liquid stretch
         float speed = MathF.Abs(_x.Velocity);
         float stretch = MathF.Min(speed * 0.045f, 90 * _s);
         float squash = 1 - MathF.Min(speed / 7000f, 0.35f);
@@ -444,15 +445,20 @@ public sealed class IslandWindow : Window
         bool captureDue = _useGlass && now - _lastCapture >= captureEvery - 0.004 && PowerManager.EnergySaverStatus != EnergySaverStatus.On;
         if (captureDue && _capture?.TryUpdate() == true) { _dirty = true; _lastCapture = now; }
         bool playing = MediaPlaying && (_mode is Mode.Compact or Mode.Expanded || _stack.Value > 2 * _s) || _mode == Mode.Expanded && (MediaView.TitleScrolls || MediaView.LyricsAnimating(_clock.Elapsed.TotalSeconds));
-        if (playing) _dirty = true; // waveform, progress bar and scrolling title move
+        // waveform, progress bar and scrolling title move. Reduced/Off animations: the pill only redraws once a second (still waveform, progress); an open card keeps 15 fps for its scrolling title and lyrics.
+        if (playing && (set.Lively || _mode == Mode.Expanded || (int)now != _playSecond)) { _playSecond = (int)now; _dirty = true; }
         if (ShowClock && DateTime.Now.Minute != _clockMinute) { _clockMinute = DateTime.Now.Minute; _dirty = true; } // clock: one redraw per minute change
         if (_timer is not null)
         {
             if (_timer.Finished) { _timer = null; if (_mode == Mode.Compact) SetMode(RestMode(near: false)); } // Clock's own alarm notification takes over
             else if ((int)_timer.Now().TotalSeconds != _timerSecond) { _timerSecond = (int)_timer.Now().TotalSeconds; _dirty = true; } // one redraw per second
         }
-        _slowTick.Interval = TimeSpan.FromMilliseconds(playing && set.Power != PowerMode.Saver ? 33 : 66); // waveform needs ~30 fps to look alive; Battery saver accepts 15
+        _slowTick.Interval = TimeSpan.FromMilliseconds(playing && set.Lively && set.Power != PowerMode.Saver ? 33 : 66); // waveform needs ~30 fps to look alive; Battery saver accepts 15
 
+        if (animating && set.Animations == AnimationLevel.Off) // no motion: every shape change lands at once
+        {
+            _x.Snap(); _w.Snap(); _h.Snap(); _top.Snap(); _stack.Snap(); _stackW.Snap(); _stackH.Snap();
+        }
         if (animating)
         {
             _x.Step(dt); _w.Step(dt); _h.Step(dt); _top.Step(dt); _stack.Step(dt); _stackW.Step(dt); _stackH.Step(dt);
@@ -540,7 +546,7 @@ public sealed class IslandWindow : Window
             SetFast(true);
             return false;
         }
-        if (now - _leaveAt < LeaveTime) return false;
+        if (now - _leaveAt < (Settings.Current.Animations == AnimationLevel.Off ? 0 : LeaveTime)) return false; // Off: gone at once
         _leaving = false;
         // Continue from what's on screen: the stacked media that glided up becomes the island, or the island comes back
         // down out of the edge it just tucked into.
@@ -576,7 +582,7 @@ public sealed class IslandWindow : Window
             _lastFullscreenCheck = 0; // re-check now: the full-screen state may be a second old (e.g. the snip overlay just closed)
             (_note, _noteUntil) = (next, now + (NotificationView.KindOf(next) == NoteKind.Alarm ? 30 : Settings.Current.NotificationSeconds)); // a ringing alarm stays until clicked, dismissed or 30 s
             SetMode(Mode.Notify);
-            _w.Velocity += 600 * _s; // arrival bounce
+            if (Settings.Current.Lively) _w.Velocity += 600 * _s; // arrival bounce
         }
         else
         {
@@ -654,7 +660,7 @@ public sealed class IslandWindow : Window
         _pressX = PointerX(e);
         _pressY = PointerY(e);
         _grabOffset = _pressX - _x.Value;
-        _w.Velocity += 250 * _s; // little squish so the press feels physical
+        if (Settings.Current.Lively) _w.Velocity += 250 * _s; // little squish so the press feels physical
         _root.CapturePointer(e.Pointer);
         SetFast(true);
     }
@@ -881,7 +887,7 @@ public sealed class IslandWindow : Window
         washStrength *= 1 + 0.5f * landed; // the inner light brightens a touch at the flow's impact, then settles
         glowStrength = MathF.Max(glowStrength, 0.25f * landed); // barely-there light spilling as the flow lands
         // Melting: the bottom drips down while the card grows. Not for the pill: there the drop read as a second pill popping out underneath.
-        float sag = _mode is Mode.Expanded or Mode.Notify || _detail ? Math.Clamp(_h.Velocity * 0.012f, 0, 20 * _s) : 0;
+        float sag = Settings.Current.Lively && (_mode is Mode.Expanded or Mode.Notify || _detail) ? Math.Clamp(_h.Velocity * 0.012f, 0, 20 * _s) : 0;
         float reach = (float)Math.Clamp((clock - _reachAt) / 0.25, 0, 1);
         if (reach is > 0 and < 1) sag = MathF.Max(sag, 8 * _s * MathF.Sin(MathF.PI * reach)); // the underside bulges toward the incoming drop
         float ripple = (float)((clock - _rippleAt) / 0.7);
@@ -916,7 +922,7 @@ public sealed class IslandWindow : Window
                 DrawClock(ds, new Windows.Foundation.Rect(rect.X, rect.Y, rect.Width, 18 * _s), 1 - e);
                 ds.Transform = old;
             }
-            if (ripple is > 0 and < 1) // soft ring running out along the glass from where the drop hit
+            if (ripple is > 0 and < 1 && Settings.Current.Lively) // soft ring running out along the glass from where the drop hit
             {
                 float e = 1 - (1 - ripple) * (1 - ripple), rx = (float)rect.Width * 0.65f * e;
                 ds.DrawEllipse((float)(rect.X + rect.Width / 2), (float)rect.Bottom, rx, rx * 0.4f,

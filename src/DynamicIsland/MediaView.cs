@@ -27,7 +27,9 @@ static class MediaView
         float cy = (float)(r.Y + r.Height / 2), x0 = (float)r.Right - 14 * s - 4 * 6 * s;
         for (int i = 0; i < 4; i++)
         {
-            float h = m.Playing ? (0.3f + 0.7f * MathF.Abs(MathF.Sin((float)time * (5 + i * 1.7f) + i))) * 14 * s : 3 * s;
+            float h = !m.Playing ? 3 * s
+                : Settings.Current.Lively ? (0.3f + 0.7f * MathF.Abs(MathF.Sin((float)time * (5 + i * 1.7f) + i))) * 14 * s
+                : (i is 1 or 3 ? 0.85f : 0.5f) * 14 * s; // Animations reduced/off: a still waveform, so the pill needn't redraw 30 times a second
             ds.FillRoundedRectangle(x0 + i * 6 * s, cy - h / 2, 3 * s, h, 1.5f * s, 1.5f * s, White(0.85f * a));
         }
     }

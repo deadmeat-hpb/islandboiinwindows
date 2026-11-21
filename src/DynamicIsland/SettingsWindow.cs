@@ -123,6 +123,7 @@ public sealed class SettingsWindow : Window
                 page.Children.Add(Card("", "Full-screen apps", "Games, videos and presentations.",
                     Choice(["Keep the slim bar", "Hide the island"], s => s.HideInFullscreen ? 1 : 0, (s, i) => s.HideInFullscreen = i == 1)));
                 page.Children.Add(Card("", "Drop animation", "Light flows from the music player or Clock into the island when you minimise it.", Toggle(s => s.DropAnimation, (s, v) => s.DropAnimation = v)));
+                page.Children.Add(Note(() => Settings.Current.Lively ? null : "Animations are set to Reduced or Off in Power and performance, so the drop doesn't play."));
                 break;
 
             case "appearance":
@@ -143,6 +144,8 @@ public sealed class SettingsWindow : Window
             case "power":
                 page.Children.Add(Card("", "Mode", "Quality: smoothest glass. Balanced: the usual. Battery saver: a solid island and fewer redraws.",
                     Choice(["Quality", "Balanced", "Battery saver"], s => (int)s.Power, (s, i) => s.Power = (PowerMode)i)));
+                page.Children.Add(Card("", "Animations", "Full: wobble, stretch, drip and the drop from the taskbar. Reduced: islands still glide, but no wobble or drip and a still waveform. Off: everything appears in place, the lightest on the graphics chip.",
+                    Choice(["Full", "Reduced", "Off"], s => (int)s.Animations, (s, i) => s.Animations = (AnimationLevel)i)));
                 page.Children.Add(Card("", "Pause the glass on battery", "Use the solid island while unplugged.", Toggle(s => s.PauseGlassOnBattery, (s, v) => s.PauseGlassOnBattery = v)));
                 page.Children.Add(Note(() => Settings.Current.LiquidGlass ? null : "Liquid glass is off in Appearance, so the island is always solid."));
                 break;

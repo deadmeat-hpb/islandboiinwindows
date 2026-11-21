@@ -5,6 +5,7 @@ namespace DynamicIsland;
 
 enum PowerMode { Quality, Balanced, Saver }
 enum IslandSize { Small, Default, Large }
+enum AnimationLevel { Full, Reduced, Off }
 
 /// <summary>
 /// The user's choices from the Settings app. Saved as JSON in %LOCALAPPDATA%\DynamicIslandData\settings.json and applied
@@ -40,6 +41,10 @@ sealed class Settings
     // Power
     public PowerMode Power { get; set; } = PowerMode.Balanced;
     public bool PauseGlassOnBattery { get; set; }
+    public AnimationLevel Animations { get; set; } = AnimationLevel.Full;
+
+    /// <summary>Wobble, stretch, drip, ripple, the moving waveform and the drop from the taskbar: Full only.</summary>
+    [System.Text.Json.Serialization.JsonIgnore] public bool Lively => Animations == AnimationLevel.Full;
 
     [System.Text.Json.Serialization.JsonIgnore] public float SizeScale => Size switch { IslandSize.Small => 0.85f, IslandSize.Large => 1.15f, _ => 1f };
 

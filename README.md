@@ -34,7 +34,7 @@ Dynamic Island lives in the taskbar's hidden icons (the ^ arrow). Click the icon
 - **General**: start with Windows or only when opened, show or hide the island, quit, reset all settings.
 - **Island behaviour**: switch each island on or off (music, notifications, screenshots, volume and brightness, battery, Bluetooth, Wi-Fi); clock or slim resting bar; notification time (3, 5 or 8 s); keep the slim bar or hide in full-screen apps; the drop animation from the music player or Clock; Clock timers on or off.
 - **Appearance**: liquid glass or a solid dark island, size (small, default, large), 24- or 12-hour clock, date on or off, re-centre the island.
-- **Power and performance**: Quality, Balanced or Battery saver (solid island, 15 fps waveform), and pausing the glass on battery.
+- **Power and performance**: Quality, Balanced or Battery saver (solid island, 15 fps waveform); Animations Full, Reduced (no wobble, stretch, drip or drop; still waveform, pill redraws once a second) or Off (everything appears in place); pausing the glass on battery.
 - **About**: version, the crash log folder, the source.
 
 ## Run
