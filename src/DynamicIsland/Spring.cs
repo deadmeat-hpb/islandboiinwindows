@@ -8,6 +8,9 @@ struct Spring(float value, float stiffness, float damping)
 
     public readonly bool Settled => MathF.Abs(Target - Value) < 0.05f && MathF.Abs(Velocity) < 0.05f;
 
+    /// <summary>Jump straight to the target (Animations: Off).</summary>
+    public void Snap() { Value = Target; Velocity = 0; }
+
     public void Step(float dt)
     {
         const int substeps = 4;

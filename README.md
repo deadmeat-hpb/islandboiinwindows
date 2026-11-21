@@ -4,29 +4,51 @@ A Dynamic Island for Windows, with an Apple Liquid Glass look.
 
 ## What it does
 
-- Idle: a slim glass bar at the top of the screen. Clicks pass through around it.
+### The island
+- Idle: a slim glass bar hanging from the top edge, lit softly from below (the song's colour while music plays). Clicks pass through around it. It always shows the time and date (while music plays, the bar is lit in the album colour); when it opens into a pill, the time drops into the pill and fades as the pill's content rises in.
 - Hover: it swells so it's easy to grab.
 - Drag it left or right along the top edge. It stretches with speed, bounces back, snaps to left / center / right, and remembers where you left it.
-- Click: morphs into the expanded card. Click again, or move the mouse away, to collapse.
-- Music: while anything plays (Spotify, a browser, Media Player...), the island becomes a compact pill with the album art and a moving waveform. Click it for the full card: art, title, artist, progress, and previous / play-pause / next. The card also shows the current lyric line above the progress bar when [LRCLIB](https://lrclib.net) has synced lyrics for the song (it receives the title and artist).
-- Notifications: new Windows notifications drop down from the island for 5 seconds (hover to keep one open, click to open the app). Windows asks once for notification access. To stop Windows' own pop-ups doubling up, turn off "Show notification banners" in Settings > System > Notifications.
-- Volume, brightness (laptop screens) and plugging in the charger show a slim pop-up with an icon and level bar.
-- Tailored notices: battery low (20/10/5%), Bluetooth device connected (with its battery when the device reports it), Wi-Fi connected, and charging, as a slim pill with an icon, text and a level ring. Click a notice to open its Settings page (battery, Bluetooth, Wi-Fi).
-- Clicks step through: bar → now-playing pill → full card → opens the playing app. Moving the mouse away collapses it.
-- Hides itself while a fullscreen game, video or presentation is in front, and does no work while hidden.
-- Volume pop-up follows the current output device, so switching to Bluetooth buds keeps working.
-- Right-click: quit.
+- Clicks step through stages: bar → pill → card. Right-click goes back a stage. Moving the mouse away collapses a pill to the bar; a card you opened stays until you close it.
+- Every pill and card is floating glass with a soft inner light in its source's colour (album, app, notice). Text is set in Inter (bundled, SIL Open Font License).
+- Fullscreen games, videos and presentations: the island stays the idle bar.
+
+### Music
+- Pill: album art and a moving waveform. With nothing playing, the pill is a clock (time left, date right).
+- Card: art, title, artist, controls, and a progress bar in the album colour with a light running along it. Click or drag the bar to seek. Only a click on the album art brings the playing app forward.
+- Synced lyrics from [LRCLIB](https://lrclib.net) (it receives the title and artist) slide in beside the title as a three-line list that scrolls with the song; the previous and next lines are faded.
+- Minimize the window that's playing: a drop of light flows from its taskbar button into the bar, which opens into the pill.
+
+### Notifications and notices
+- New Windows notifications drop down as a pill for 5 seconds (hover keeps them). Click to open the card, click the card to open the app, right-click to dismiss; they slide up into the edge when they leave. Windows asks once for notification access; turn off "Show notification banners" in Settings > System > Notifications to avoid doubles.
+- Full-screen captures (Win+PrtScn) saved to PicturesScreenshots get the screenshot island too (one island per capture; click it to open the image).
+- Tailored designs: messages (sender + bubble), mail (sender, subject, preview), calendar (time + countdown), calls, browser push (site), screenshots (the snip as a thumbnail), Logitech G HUB DPI, and a generic card.
+- Built-in Windows apps get their own glyph badge in the app's colour: Clock alarms and timers (still halo rings, the time or "Time's up" large, held up to 30 seconds), Windows Security (green Protected / red Action needed), Windows Update (Restart required), Microsoft Store (Installed / Updated), Game Bar clips and screenshots, Phone Link messages and calls, Microsoft To Do reminders as calendar cards, and Windows system toasts: USB drives (AutoPlay), low disk space, printing, Bluetooth pairing, OneDrive, Windows Backup, new startup apps, audio and Wi-Fi. Snipping Tool screen recordings get the recording design. Badge cards size themselves to their text.
+- `DynamicIsland.exe --preview <folder>` renders every notification design to PNG and exits (the island hides itself from screenshots). Windows only gives the island a notification's text and app icon, so images inside toasts, toast buttons and inline replies aren't available.
+- Volume (card: slider, mute, switch output device), brightness (laptop panels), charging / unplugged / battery low, energy saver on / off, Bluetooth connected and Wi-Fi connected drop down as a badge pill (battery capsule, device battery, signal bars); click it for its card with the value large and a settings button.
+- Stacking: while a notification or notice is up, the music pill sits below it. Click either one to open its card in place.
+
+## Settings
+
+Dynamic Island lives in the taskbar's hidden icons (the ^ arrow). Click the icon, or open the app again while it runs, to open Settings; right-click it for Settings, Hide island and Quit. Settings is a normal Windows 11 window with five pages, and every change saves at once (%LOCALAPPDATA%\DynamicIslandData\settings.json) and applies live:
+
+- **General**: start with Windows or only when opened, show or hide the island, quit, reset all settings.
+- **Island behaviour**: switch each island on or off (music, notifications, screenshots, volume and brightness, battery, Bluetooth, Wi-Fi); clock or slim resting bar; notification time (3, 5 or 8 s); keep the slim bar or hide in full-screen apps; the drop animation from the music player or Clock; Clock timers on or off.
+- **Appearance**: liquid glass or a solid dark island, size (small, default, large), 24- or 12-hour clock, date on or off, re-centre the island.
+- **Power and performance**: Quality, Balanced or Battery saver (solid island, 15 fps waveform); Animations Full, Reduced (no wobble, stretch, drip or drop; still waveform, pill redraws once a second) or Off (everything appears in place); pausing the glass on battery.
+- **About**: version, the crash log folder, the source.
 
 ## Run
 
-Needs Windows 10 2004+ (Windows 11 recommended), the .NET 8 SDK or newer, and Visual Studio 2022 with the ".NET desktop" and "Windows App SDK" workloads.
+Needs Windows 10 2004+ (Windows 11 recommended) and the .NET 8 SDK or newer. Visual Studio is optional: the project builds with the dotnet CLI (`EnableMsixTooling`).
 
 ```powershell
 cd src/DynamicIsland
-dotnet run
+dotnet build -c Release -p:Platform=x64 -r win-x64
 ```
 
-Or open `src/DynamicIsland/DynamicIsland.csproj` in Visual Studio, pick x64, and press F5.
+The app is self-contained for the Windows App SDK; run `bin\x64\Release\net8.0-windows10.0.22621.0\win-x64\DynamicIsland.exe`. It starts at sign-in (unless switched off in Settings) and restarts after a crash. Quit it from the tray icon. On the laptop a scheduled task "DynamicIsland Restart" also relaunches it when Windows logs a crash (Application Error 1000), which covers crashes in the first minute; errors are logged to %LOCALAPPDATA%DynamicIslandDataash.log.
+
+Unsigned builds are blocked while Windows Smart App Control is on.
 
 ## How the glass works
 
