@@ -12,7 +12,7 @@ using FontWeight = Windows.UI.Text.FontWeight;
 namespace DynamicIsland;
 
 /// <summary>What kind of notification it is, which picks its pill and card design.</summary>
-enum NoteKind { Generic, Message, Mail, Calendar, Call, Web, Screenshot, Dpi, Alarm, Security, Update, Store, Capture, System }
+enum NoteKind { Generic, Message, Mail, Calendar, Call, Web, Screenshot, Dpi, Alarm, Security, Update, Store, Capture, System, Claude, Outlook }
 
 /// <summary>
 /// Notification pills and cards. Windows only gives a notification listener the toast's text and the app's icon (no
@@ -27,6 +27,7 @@ static partial class NotificationView
 
     [GeneratedRegex(@"\b(incoming (video |voice |audio )?call|is calling|calling you|來電|通話)", RegexOptions.IgnoreCase)] private static partial Regex CallText();
     [GeneratedRegex(@"\b(reminder|starts? (in|at)|meeting|event|提醒|會議)\b", RegexOptions.IgnoreCase)] private static partial Regex CalendarText();
+    [GeneratedRegex(@"\b(reminder|starts? (in|at|now)|提醒)\b", RegexOptions.IgnoreCase)] private static partial Regex ReminderText(); // Outlook: an email that merely mentions a meeting stays an email
     [GeneratedRegex(@"^(?:https?://)?([\w-]+\.)+[a-z]{2,}(/\S*)?$", RegexOptions.IgnoreCase)] private static partial Regex Domain();
     [GeneratedRegex(@"\b(\d{1,2}):(\d{2})\s*(am|pm|上午|下午)?", RegexOptions.IgnoreCase)] private static partial Regex Clock();
     [GeneratedRegex(@"\d{2,5}")] private static partial Regex Number();
@@ -44,6 +45,7 @@ static partial class NotificationView
         if (app.Contains("WindowsUpdate", StringComparison.OrdinalIgnoreCase)) return NoteKind.Update;
         if (Has(app, ["WindowsStore", "AppInitiatedDownload"])) return NoteKind.Store;
         if (SystemBadge(app, text) is not null) return NoteKind.System;
+        if (app.Contains("AnthropicPBC.Claude", StringComparison.OrdinalIgnoreCase) || n.App.Equals("Claude", StringComparison.OrdinalIgnoreCase)) return NoteKind.Claude;
         if (app.Contains("ScreenSketch", StringComparison.OrdinalIgnoreCase) && RecordText().IsMatch(text)) return NoteKind.Capture; // Snipping Tool screen recording
         if (app.Contains("G HUB", StringComparison.OrdinalIgnoreCase) || app.Contains("logitech", StringComparison.OrdinalIgnoreCase))
             return text.Contains("DPI", StringComparison.OrdinalIgnoreCase) || Number().IsMatch(text) ? NoteKind.Dpi : NoteKind.Generic;
@@ -51,7 +53,8 @@ static partial class NotificationView
             return NoteKind.Screenshot;
         if (CallText().IsMatch(text)) return NoteKind.Call;
         if (Has(app, Messengers)) return NoteKind.Message;
-        if (app.Contains("calendar", StringComparison.OrdinalIgnoreCase) || app.Contains("Todos", StringComparison.OrdinalIgnoreCase) || app.Contains("outlook", StringComparison.OrdinalIgnoreCase) && CalendarText().IsMatch(text)) return NoteKind.Calendar;
+        if (app.Contains("calendar", StringComparison.OrdinalIgnoreCase) || app.Contains("Todos", StringComparison.OrdinalIgnoreCase) || app.Contains("outlook", StringComparison.OrdinalIgnoreCase) && ReminderText().IsMatch(text)) return NoteKind.Calendar;
+        if (app.Contains("outlook", StringComparison.OrdinalIgnoreCase)) return NoteKind.Outlook; // Outlook reminders went to Calendar above
         if (Has(app, Mailers)) return NoteKind.Mail;
         if (Has(app, Browsers)) return NoteKind.Web;
         if (CalendarText().IsMatch(n.Title)) return NoteKind.Calendar;
@@ -68,8 +71,18 @@ static partial class NotificationView
         NoteKind.Calendar => 140,
         NoteKind.Alarm => 132,
         NoteKind.Security or NoteKind.Update or NoteKind.Store or NoteKind.Capture or NoteKind.System => BadgeCardH(n),
+        NoteKind.Claude => ClaudeCardH(n),
         _ => 168,
     };
+
+    /// <summary>Claude cards fit their text: header, title, the quote panel (up to five lines), bottom margin.</summary>
+    static float ClaudeCardH(IslandNotification n)
+    {
+        if (n.Body.Length == 0) return 46 + 22 + 18;
+        using var f = Format(13, FontWeights.Normal, wrap: true);
+        using var layout = new CanvasTextLayout(CanvasDevice.GetSharedDevice(), n.Body, f, CardW - 32 - 28, 90);
+        return 46 + 30 + MathF.Min((float)layout.LayoutBounds.Height, 90) + 16 + 16;
+    }
 
     /// <summary>Badge cards fit their text: header, title, up to two body lines, the chip, then the bottom margin.</summary>
     static float BadgeCardH(IslandNotification n)
@@ -141,6 +154,7 @@ static partial class NotificationView
         var iconRect = new Rect(x + 16 * s, y + (h - icon) / 2, icon, icon);
         if (kind == NoteKind.Screenshot && n.Thumb is { } snip) Cover(ds, snip, iconRect, 10 * s, s, a); // the snip itself
         else if (Badge(n) is { } badge) DrawBadge(ds, iconRect, s, badge, a, kind == NoteKind.Alarm);
+        else if (kind == NoteKind.Outlook) Avatar(ds, iconRect, s, n, a);
         else Icon(ds, n, iconRect, a, kind is NoteKind.Message or NoteKind.Call);
         float tx = x + 70 * s, tw = w - 86 * s;
         using var title = Format(15 * s, FontWeights.SemiBold);
@@ -156,8 +170,11 @@ static partial class NotificationView
         string head = n.Title.Length > 0 ? n.Title : n.App;
         string line = kind == NoteKind.Web ? SplitSite(n).Body : n.Body;
         if (kind == NoteKind.Call) line = "Incoming call";
+        if (kind == NoteKind.Outlook) line = n.Body.Split('\n')[0]; // the subject
+        var lineColor = White(0.67f * a);
+        if (kind == NoteKind.Claude && ClaudeStatus(n) is { Length: > 0 } st) (line, lineColor) = (st, Tint(ClaudeOrange, a));
         ds.DrawText(head, new Rect(tx, y + 15 * s, tw, 22 * s), White(a), title);
-        ds.DrawText(line.Length > 0 ? line.Replace('\n', ' ') : n.App, new Rect(tx, y + 39 * s, tw, 20 * s), White(0.67f * a), body);
+        ds.DrawText(line.Length > 0 ? line.Replace('\n', ' ') : n.App, new Rect(tx, y + 39 * s, tw, 20 * s), lineColor, body);
     }
 
     // ---------------------------------------------------------------- card
@@ -204,6 +221,46 @@ static partial class NotificationView
                 ds.DrawText(n.Title.Length > 0 ? n.Title : n.App, new Rect(x + pad, top, tw, 20 * s), White(0.75f * a), from);
                 ds.DrawText(lines[0], new Rect(x + pad, top + 22 * s, tw, 22 * s), White(a), subject);
                 Block(ds, lines.Length > 1 ? lines[1] : "", new Rect(x + pad, top + 48 * s, tw, bottom - top - 48 * s), White(0.62f * a), preview);
+                break;
+            }
+            case NoteKind.Claude: // status chip in the header, title, the text in a terracotta-ruled quote panel
+            {
+                string status = ClaudeStatus(n);
+                if (status.Length > 0)
+                {
+                    using var chip = Format(11.5f * s, FontWeights.SemiBold, h: CanvasHorizontalAlignment.Center, v: CanvasVerticalAlignment.Center);
+                    using var ctl = new CanvasTextLayout(ds, status, chip, tw, 22 * s);
+                    float chw = (float)ctl.LayoutBounds.Width + 20 * s;
+                    var cr = new Rect(x + w - pad - chw, y + 14 * s, chw, 22 * s);
+                    ds.FillRoundedRectangle(cr, 11 * s, 11 * s, Tint(ClaudeOrange, 0.22f * a));
+                    ds.DrawText(status, cr, Tint(ClaudeOrange, a), chip);
+                }
+                using var title = Format(15 * s, FontWeights.SemiBold);
+                using var text = Format(13 * s, FontWeights.Normal, wrap: true);
+                ds.DrawText(n.Title.Length > 0 ? n.Title : n.App, new Rect(x + pad, top, tw, 22 * s), White(a), title);
+                if (n.Body.Length > 0)
+                {
+                    float py = top + 30 * s, ph = bottom - py;
+                    using var layout = new CanvasTextLayout(ds, n.Body, text, tw - 28 * s, ph - 16 * s);
+                    float bh = MathF.Min((float)layout.LayoutBounds.Height, ph - 16 * s) + 16 * s;
+                    var panel = new Rect(x + pad, py, tw, bh);
+                    ds.FillRoundedRectangle(panel, 10 * s, 10 * s, White(0.06f * a));
+                    ds.FillRoundedRectangle(x + pad, py, 3 * s, bh, 1.5f * s, 1.5f * s, Tint(ClaudeOrange, 0.9f * a));
+                    using (ds.CreateLayer(1f, panel)) ds.DrawTextLayout(layout, x + pad + 16 * s, py + 8 * s, White(0.85f * a));
+                }
+                break;
+            }
+            case NoteKind.Outlook: // sender's initials avatar, sender, subject in Outlook blue, preview
+            {
+                var lines = n.Body.Split('\n', 2);
+                float av = 40 * s, tx = x + pad + av + 12 * s, cw = tw - av - 12 * s;
+                Avatar(ds, new Rect(x + pad, top, av, av), s, n, a);
+                using var from = Format(15 * s, FontWeights.SemiBold);
+                using var subject = Format(13.5f * s, FontWeights.Medium);
+                using var preview = Format(13 * s, FontWeights.Normal, wrap: true);
+                ds.DrawText(n.Title.Length > 0 ? n.Title : n.App, new Rect(tx, top - 1 * s, cw, 22 * s), White(a), from);
+                ds.DrawText(lines[0].Length > 0 ? lines[0] : "New email", new Rect(tx, top + 21 * s, cw, 20 * s), Tint(OutlookBlue, a), subject);
+                Block(ds, lines.Length > 1 ? lines[1] : "", new Rect(x + pad, top + 52 * s, tw, bottom - top - 52 * s), White(0.62f * a), preview);
                 break;
             }
             case NoteKind.Calendar: // accent bar, title, time + countdown, location
@@ -336,6 +393,30 @@ static partial class NotificationView
     static bool Says(IslandNotification n, string pattern) => Regex.IsMatch($"{n.Title}\n{n.Body}", pattern, RegexOptions.IgnoreCase);
 
     static readonly Color Amber = ColorHelper.FromArgb(255, 255, 170, 60);
+    static readonly Color ClaudeOrange = ColorHelper.FromArgb(255, 217, 119, 87);
+    static readonly Color OutlookBlue = ColorHelper.FromArgb(255, 70, 150, 240);
+
+    /// <summary>What Claude's toast is about: it waits on the person, or it has finished; "" when the text says neither.</summary>
+    static string ClaudeStatus(IslandNotification n) =>
+        Says(n, "permission|approv|allow|waiting|needs? your|input|question|confirm|權限|允許|等待") ? "Needs you"
+        : Says(n, "finish|complete|done|ready|replied|responded|完成") ? "Done" : "";
+
+    /// <summary>Outlook: the sender's initials in a blue circle (an envelope when the name has no letters).</summary>
+    static void Avatar(CanvasDrawingSession ds, Rect r, float s, IslandNotification n, float a)
+    {
+        float cx = (float)(r.X + r.Width / 2), cy = (float)(r.Y + r.Height / 2), rad = (float)r.Width / 2;
+        ds.FillCircle(cx, cy, rad, Tint(OutlookBlue, 0.28f * a));
+        ds.DrawCircle(cx, cy, rad - 0.5f * s, Tint(OutlookBlue, 0.45f * a), 1 * s);
+        string initials = string.Concat(n.Title.Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(wd => char.IsLetter(wd[0])).Take(2).Select(wd => char.ToUpperInvariant(wd[0])));
+        if (initials.Length == 0)
+        {
+            using var glyph = new CanvasTextFormat { FontFamily = "Segoe Fluent Icons", FontSize = rad * 0.9f, HorizontalAlignment = CanvasHorizontalAlignment.Center, VerticalAlignment = CanvasVerticalAlignment.Center };
+            ds.DrawText("", r, Tint(OutlookBlue, a), glyph);
+            return;
+        }
+        using var f = Format(rad * 0.75f, FontWeights.SemiBold, h: CanvasHorizontalAlignment.Center, v: CanvasVerticalAlignment.Center);
+        ds.DrawText(initials, r, White(0.95f * a), f);
+    }
 
     /// <summary>The glyph badge that stands in for the app icon on built-in Windows apps (system toasts often have no logo).</summary>
     static BadgeInfo? Badge(IslandNotification n) => KindOf(n) switch
