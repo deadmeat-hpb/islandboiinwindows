@@ -58,6 +58,26 @@ sealed class Settings
         catch (Exception ex) { Crash.Log("Settings load", ex); Current = new(); } // a broken file falls back to the defaults
     }
 
+    /// <summary>Glass is drawn right now: switched on, and neither Battery saver nor "pause on battery" is holding it back.</summary>
+    public static bool GlassActive(out string? reason)
+    {
+        var s = Current;
+        bool battery = Windows.System.Power.PowerManager.PowerSupplyStatus == Windows.System.Power.PowerSupplyStatus.NotPresent
+            && Windows.System.Power.PowerManager.BatteryStatus != Windows.System.Power.BatteryStatus.NotPresent;
+        reason = !s.LiquidGlass ? null
+            : s.Power == PowerMode.Saver ? "Battery saver mode (Power and performance) is showing the solid island for now."
+            : s.PauseGlassOnBattery && battery ? "You're on battery and the glass is paused on battery, so the island is solid for now."
+            : null;
+        return s.LiquidGlass && reason is null;
+    }
+
+    /// <summary>Back to the defaults (Settings > General), saved and applied.</summary>
+    public static void ResetAll() => Update(s =>
+    {
+        var d = new Settings();
+        foreach (var p in typeof(Settings).GetProperties().Where(p => p.CanWrite)) p.SetValue(s, p.GetValue(d));
+    });
+
     /// <summary>Changes one value, saves, applies startup, and tells the island.</summary>
     public static void Update(Action<Settings> change)
     {

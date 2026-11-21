@@ -51,6 +51,8 @@ public sealed class SettingsWindow : Window
         SetTitleBar(titleBar);
 
         _nav.SelectedItem = _nav.MenuItems[0];
+        Settings.Changed += OnSettingsChanged;
+        Closed += (_, _) => Settings.Changed -= OnSettingsChanged;
 
         // Sized and centred on the screen it opens on.
         float scale = Native.GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96f;
@@ -77,6 +79,7 @@ public sealed class SettingsWindow : Window
 
     void Show(string tag)
     {
+        _sync.Clear();
         var page = new StackPanel { Spacing = 4, MaxWidth = 1000, HorizontalAlignment = HorizontalAlignment.Stretch };
         page.Children.Add(new TextBlock { Text = Pages.First(p => p.Tag == tag).Text, Style = Res<Style>("TitleTextBlockStyle"), Margin = new Thickness(0, 4, 0, 20) });
         switch (tag)
@@ -89,6 +92,17 @@ public sealed class SettingsWindow : Window
                 var quit = new Button { Content = "Quit" };
                 quit.Click += (_, _) => App.Quit();
                 page.Children.Add(Card("", "Quit Dynamic Island", "Closes the island and its icon until you open the app again.", quit));
+                var resetAll = new Button { Content = "Reset" };
+                resetAll.Click += async (_, _) =>
+                {
+                    var ask = new ContentDialog
+                    {
+                        XamlRoot = Content.XamlRoot, Title = "Reset all settings?", Content = "Every page goes back to how Dynamic Island came. The island's position stays.",
+                        PrimaryButtonText = "Reset", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Close,
+                    };
+                    if (await ask.ShowAsync() == ContentDialogResult.Primary) Settings.ResetAll();
+                };
+                page.Children.Add(Card("", "Reset all settings", "Back to the defaults on every page.", resetAll));
                 break;
 
             case "behaviour":
@@ -112,8 +126,9 @@ public sealed class SettingsWindow : Window
                 break;
 
             case "appearance":
-                page.Children.Add(Card("", "Liquid glass", "The island bends and blurs what's behind it. Off: a solid dark island that is lighter on the graphics chip.",
+                page.Children.Add(Card("", "Liquid glass", "The island bends and blurs what's behind it. Off: a solid black island that is lighter on the graphics chip.",
                     Toggle(s => s.LiquidGlass, (s, v) => s.LiquidGlass = v)));
+                page.Children.Add(Note(() => { Settings.GlassActive(out var why); return why; }));
                 page.Children.Add(Card("", "Size", "Scales the bar, pills and cards.",
                     Choice(["Small", "Default", "Large"], s => (int)s.Size, (s, i) => s.Size = (IslandSize)i)));
                 page.Children.Add(Section("Clock"));
@@ -129,6 +144,7 @@ public sealed class SettingsWindow : Window
                 page.Children.Add(Card("", "Mode", "Quality: smoothest glass. Balanced: the usual. Battery saver: a solid island and fewer redraws.",
                     Choice(["Quality", "Balanced", "Battery saver"], s => (int)s.Power, (s, i) => s.Power = (PowerMode)i)));
                 page.Children.Add(Card("", "Pause the glass on battery", "Use the solid island while unplugged.", Toggle(s => s.PauseGlassOnBattery, (s, v) => s.PauseGlassOnBattery = v)));
+                page.Children.Add(Note(() => Settings.Current.LiquidGlass ? null : "Liquid glass is off in Appearance, so the island is always solid."));
                 break;
 
             case "about":
@@ -174,6 +190,7 @@ public sealed class SettingsWindow : Window
         if (description is not null)
             text.Children.Add(new TextBlock { Text = description, TextWrapping = TextWrapping.Wrap, Style = Res<Style>("CaptionTextBlockStyle"), Foreground = Res<Brush>("TextFillColorSecondaryBrush") });
         control.VerticalAlignment = VerticalAlignment.Center;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(control, title); // screen readers say "Liquid glass", not "On"
         control.Margin = new Thickness(8, 0, 0, 0);
         Grid.SetColumn(text, 1);
         Grid.SetColumn(control, 2);
@@ -192,19 +209,43 @@ public sealed class SettingsWindow : Window
         };
     }
 
-    static ToggleSwitch Toggle(Func<Settings, bool> get, Action<Settings, bool> set)
+    // Controls on the open page follow changes made elsewhere (the tray menu's Hide island, Reset): each registers how to
+    // re-read its value. _syncing stops a control that is being set from writing the value straight back.
+    readonly List<Action> _sync = [];
+    bool _syncing;
+
+    void OnSettingsChanged()
+    {
+        _syncing = true;
+        try { foreach (var refresh in _sync) refresh(); }
+        finally { _syncing = false; }
+    }
+
+    ToggleSwitch Toggle(Func<Settings, bool> get, Action<Settings, bool> set)
     {
         var t = new ToggleSwitch { IsOn = get(Settings.Current), OnContent = "On", OffContent = "Off", MinWidth = 0 };
-        t.Toggled += (_, _) => Settings.Update(s => set(s, t.IsOn));
+        t.Toggled += (_, _) => { if (!_syncing && t.IsOn != get(Settings.Current)) Settings.Update(s => set(s, t.IsOn)); };
+        _sync.Add(() => { if (t.IsOn != get(Settings.Current)) t.IsOn = get(Settings.Current); });
         return t;
     }
 
-    static ComboBox Choice(string[] items, Func<Settings, int> get, Action<Settings, int> set)
+    ComboBox Choice(string[] items, Func<Settings, int> get, Action<Settings, int> set)
     {
         var c = new ComboBox { MinWidth = 170 };
         foreach (var i in items) c.Items.Add(i);
         c.SelectedIndex = get(Settings.Current);
-        c.SelectionChanged += (_, _) => { if (c.SelectedIndex >= 0) Settings.Update(s => set(s, c.SelectedIndex)); };
+        c.SelectionChanged += (_, _) => { if (!_syncing && c.SelectedIndex >= 0 && c.SelectedIndex != get(Settings.Current)) Settings.Update(s => set(s, c.SelectedIndex)); };
+        _sync.Add(() => { if (c.SelectedIndex != get(Settings.Current)) c.SelectedIndex = get(Settings.Current); });
         return c;
+    }
+
+    /// <summary>A note under a card that shows only while <paramref name="text"/> returns something, e.g. why the glass is solid.</summary>
+    TextBlock Note(Func<string?> text)
+    {
+        var t = new TextBlock { TextWrapping = TextWrapping.Wrap, Style = Res<Style>("CaptionTextBlockStyle"), Foreground = Res<Brush>("SystemFillColorCautionBrush"), Margin = new Thickness(56, 2, 16, 6) };
+        void Refresh() { string? s = text(); t.Text = s ?? ""; t.Visibility = s is null ? Visibility.Collapsed : Visibility.Visible; }
+        Refresh();
+        _sync.Add(Refresh);
+        return t;
     }
 }

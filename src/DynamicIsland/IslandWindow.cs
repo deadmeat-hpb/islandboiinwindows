@@ -203,6 +203,11 @@ public sealed class IslandWindow : Window
                 try { _capture = new ScreenCapture(CanvasDevice.GetSharedDevice(), _monitor, _stripH + 64); }
                 catch (Exception ex) { Debug.WriteLine($"Screen capture unavailable, using solid glass: {ex}"); }
             }
+            // Something switched off while it's on screen goes away now, not when it times out.
+            var set = Settings.Current;
+            if (!set.Music && (_mode == Mode.Expanded && _media.HasSession || _stackOpen)) { _stackOpen = false; _pinned = false; SetMode(RestMode(near: false)); }
+            if (_mode == Mode.Hud && _hud is { } h && !Allowed(h.Kind)) _hudUntil = 0;
+            if (_mode == Mode.Notify && _note is { } n && !Allowed(n)) _noteUntil = 0;
             _lastCapture = 0;
             _clockMinute = -1;
             _region = (int.MaxValue, 0, 0, 0);
@@ -432,7 +437,7 @@ public sealed class IslandWindow : Window
         // frozen in energy saver.
         bool battery = PowerManager.PowerSupplyStatus == PowerSupplyStatus.NotPresent && PowerManager.BatteryStatus != BatteryStatus.NotPresent;
         var set = Settings.Current;
-        bool glass = set.LiquidGlass && set.Power != PowerMode.Saver && !(battery && set.PauseGlassOnBattery);
+        bool glass = Settings.GlassActive(out _);
         if (glass != _useGlass) { _useGlass = glass; _lastCapture = 0; _dirty = true; }
         double rate = set.Power == PowerMode.Quality ? 0.5 : 1; // Quality refreshes the glass twice as often
         double captureEvery = (animating ? 1 / 30.0 : _mode is Mode.Idle or Mode.Hover ? 1.0 : 0.25) * (battery ? 2 : 1) * rate;
