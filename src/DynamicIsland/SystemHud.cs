@@ -234,6 +234,12 @@ sealed class SystemHud(DispatcherQueue ui)
     readonly Dictionary<string, string> _appNames = [];
 
     public bool MicInUse => _using["microphone"].Count > 0;
+
+    /// <summary>The Zoom / Teams / Meet / Discord call holding the microphone, or null.</summary>
+    public CallActivity? Call { get; private set; }
+
+    /// <summary>A call started or ended (on the UI thread).</summary>
+    public event Action? CallChanged;
     public bool CameraInUse => _using["webcam"].Count > 0;
 
     /// <summary>The microphone or camera started or stopped being used (on the UI thread).</summary>
@@ -266,12 +272,13 @@ sealed class SystemHud(DispatcherQueue ui)
         try
         {
             var now = new HashSet<string>();
+            var starts = new Dictionary<string, long>();
             using var root = Microsoft.Win32.Registry.CurrentUser.OpenSubKey($@"{ConsentStore}\{cap}");
             if (root is null) return;
             void Check(Microsoft.Win32.RegistryKey parent, string name)
             {
                 using var app = parent.OpenSubKey(name);
-                if (app?.GetValue("LastUsedTimeStart") is long start && start > 0 && app.GetValue("LastUsedTimeStop") is long stop && stop == 0) now.Add(name);
+                if (app?.GetValue("LastUsedTimeStart") is long start && start > 0 && app.GetValue("LastUsedTimeStop") is long stop && stop == 0) { now.Add(name); starts[name] = start; }
             }
             foreach (var name in root.GetSubKeyNames())
             {
@@ -284,8 +291,14 @@ sealed class SystemHud(DispatcherQueue ui)
             bool changed = !now.SetEquals(was);
             _using[cap] = now;
             if (changed) PrivacyChanged?.Invoke();
-            if (!announce || started.Count == 0) return;
             bool mic = cap == "microphone";
+            if (mic)
+            {
+                var call = CallActivity.Find(starts);
+                if (call?.Key != Call?.Key) { Call = call; CallChanged?.Invoke(); }
+                if (call is not null) started.Remove(call.Key); // the call pill says it already
+            }
+            if (!announce || started.Count == 0) return;
             Changed?.Invoke(new(mic ? "" : "", -1, "", AppName(started[0]), mic ? MicOrange : CameraGreen, 3,
                 mic ? "ms-settings:privacy-microphone" : "ms-settings:privacy-webcam", HudKind.Privacy, mic ? "Using your microphone" : "Using your camera"));
         }

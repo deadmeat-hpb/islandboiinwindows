@@ -157,6 +157,12 @@ public sealed class IslandWindow : Window
             _dirty = true;
         };
         hud.PrivacyChanged += () => _dirty = true; // the bar's mic / camera dot
+        hud.CallChanged += () =>
+        {
+            _call = hud.Call; // a new call (or its end) replaces a dismissed one
+            if (_mode is Mode.Idle or Mode.Hover or Mode.Compact) SetMode(RestMode(near: false));
+            _dirty = true;
+        };
         hud.Start();
         hud.StartClipboard(_hwnd, _messages!);
 
@@ -245,6 +251,9 @@ public sealed class IslandWindow : Window
     ClockActivity? _timer, _flowTimer;
     int _timerSecond = -1, _playSecond = -1;
     bool TimerOn => _timer is not null && Settings.Current.ClockTimers;
+    CallActivity? _call; // a call pill the user hasn't dismissed
+    int _callSecond = -1;
+    bool CallOn => _call is not null && Settings.Current.Calls;
 
     async Task FlowInCore(ClockActivity? timer)
     {
@@ -461,6 +470,7 @@ public sealed class IslandWindow : Window
             if (_timer.Finished) { _timer = null; if (_mode == Mode.Compact) SetMode(RestMode(near: false)); } // Clock's own alarm notification takes over
             else if ((int)_timer.Now().TotalSeconds != _timerSecond) { _timerSecond = (int)_timer.Now().TotalSeconds; _dirty = true; } // one redraw per second
         }
+        if (CallOn && _mode == Mode.Compact && DateTime.Now.Second != _callSecond) { _callSecond = DateTime.Now.Second; _dirty = true; } // the call length: one redraw per second
         _slowTick.Interval = TimeSpan.FromMilliseconds(playing && set.Lively && set.Power != PowerMode.Saver ? 33 : 66); // waveform needs ~30 fps to look alive; Battery saver accepts 15
 
         if (animating && set.Animations == AnimationLevel.Off) // no motion: every shape change lands at once
@@ -601,7 +611,7 @@ public sealed class IslandWindow : Window
     }
 
     /// <summary>What the island shows when not expanded: the pill after a click until the mouse leaves, else the slim bar (swollen on hover).</summary>
-    Mode RestMode(bool near) => _pinned || TimerOn ? Mode.Compact : near ? Mode.Hover : Mode.Idle; // the pill only shows after a click; otherwise the slim bar, even while music plays
+    Mode RestMode(bool near) => _pinned || TimerOn || CallOn ? Mode.Compact : near ? Mode.Hover : Mode.Idle; // the pill only shows after a click; otherwise the slim bar, even while music plays
 
     /// <summary>Right click steps back one stage: card → pill → bar. Notices and pop-ups just close.</summary>
     void OnRightClick(float y)
@@ -616,7 +626,7 @@ public sealed class IslandWindow : Window
             case Mode.Expanded: _pinned = true; SetMode(RestMode(near: true)); break;
             case Mode.Notify: _noteUntil = 0; break; // notifications and notices, pill or card: slide away (see Leave)
             case Mode.Hud: _hudUntil = 0; break;
-            default: _pinned = false; _timer = null; SetMode(RestMode(near: true)); break; // also lets go of a Clock timer pill
+            default: _pinned = false; _timer = null; _call = null; SetMode(RestMode(near: true)); break; // also lets go of a Clock timer or call pill
         }
     }
 
@@ -804,6 +814,12 @@ public sealed class IslandWindow : Window
             return;
         }
 
+        if (_mode == Mode.Compact && CallOn) // the call pill: brings the call window forward; the pill stays for the call
+        {
+            _call!.Open();
+            return;
+        }
+
         if (_mode == Mode.Compact && TimerOn) // the timer pill: back to the Clock app, which takes the timer over again
         {
             try { Process.Start(new ProcessStartInfo("ms-clock:") { UseShellExecute = true }); }
@@ -895,6 +911,7 @@ public sealed class IslandWindow : Window
         {
             Mode.Notify => _note?.Accent ?? cool,
             Mode.Hud => _hud?.Tint ?? cool,
+            Mode.Compact when CallOn => _call!.Tint,
             Mode.Compact when TimerOn => _timer!.Tint,
             _ => HasMedia ? glow : cool, // album colour, blended during the song slide
         };
@@ -918,7 +935,8 @@ public sealed class IslandWindow : Window
         {
             if (compactAlpha > 0)
             {
-                if (TimerOn) _timer!.Draw(ds, rect, _s, compactAlpha);
+                if (CallOn) _call!.Draw(ds, rect, _s, compactAlpha);
+                else if (TimerOn) _timer!.Draw(ds, rect, _s, compactAlpha);
                 else if (HasMedia) MediaView.DrawCompact(ds, rect, _s, _media, _clock.Elapsed.TotalSeconds, compactAlpha);
                 else MediaView.DrawClock(ds, rect, _s, compactAlpha, 20);
             }

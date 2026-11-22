@@ -117,5 +117,21 @@ static class Preview
             using var file = File.Create(Path.Combine(dir, $"hud-{k++}-{e.Kind}.png".ToLowerInvariant()));
             target.SaveAsync(file.AsRandomAccessStream(), CanvasBitmapFileFormat.Png).AsTask().Wait();
         }
+
+        // Call pills (210 x 32, like the timer pill), one per app.
+        foreach (var key in (string[])["C:#Program Files#Zoom#bin#Zoom.exe", "MSTeams_8wekyb3d8bbwe", "C:#Users#me#AppData#Local#Discord#app-1.0#Discord.exe"])
+        {
+            var call = CallActivity.Find(new Dictionary<string, long> { [key] = DateTime.Now.AddMinutes(-12).AddSeconds(-34).ToFileTime() })!;
+            using var target = new CanvasRenderTarget(device, 250 * s, 72 * s, 96);
+            using (var ds = target.CreateDrawingSession())
+            {
+                ds.Clear(Color.FromArgb(255, 70, 80, 95));
+                var pill = new Rect(20 * s, 20 * s, 210 * s, 32 * s);
+                ds.FillRoundedRectangle(pill, 16 * s, 16 * s, Color.FromArgb(235, 22, 22, 24));
+                call.Draw(ds, pill, s, 1);
+            }
+            using var file = File.Create(Path.Combine(dir, $"call-{call.App}.png".ToLowerInvariant()));
+            target.SaveAsync(file.AsRandomAccessStream(), CanvasBitmapFileFormat.Png).AsTask().Wait();
+        }
     }
 }
