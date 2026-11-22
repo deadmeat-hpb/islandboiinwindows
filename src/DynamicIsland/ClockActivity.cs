@@ -118,16 +118,16 @@ sealed partial record ClockActivity(bool Stopwatch, string Name, TimeSpan Value,
             using var icon = new CanvasTextFormat { FontFamily = "Segoe Fluent Icons", FontSize = 14 * s, HorizontalAlignment = CanvasHorizontalAlignment.Center, VerticalAlignment = CanvasVerticalAlignment.Center };
             ds.DrawText("", new Rect(cx - 12 * s, cy - 12 * s, 24 * s, 24 * s), C(Tint, 1), icon);
         }
-        using var time = new CanvasTextFormat
+        var time = Fonts.Shared(new CanvasTextFormat
         {
             FontFamily = Fonts.Inter(FontWeights.SemiBold), FontSize = 15 * s, FontWeight = FontWeights.SemiBold,
             HorizontalAlignment = CanvasHorizontalAlignment.Right, VerticalAlignment = CanvasVerticalAlignment.Center, WordWrapping = CanvasWordWrapping.NoWrap,
-        };
-        using var label = new CanvasTextFormat
+        });
+        var label = Fonts.Shared(new CanvasTextFormat
         {
             FontFamily = Fonts.Inter(FontWeights.Medium), FontSize = 12 * s, FontWeight = FontWeights.Medium,
             VerticalAlignment = CanvasVerticalAlignment.Center, WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character,
-        };
+        });
         float right = (float)r.Right - 14 * s, tx = x + 2 * rad + 10 * s;
         Fonts.DrawTabular(ds, Format(Now()), new Rect(tx, r.Y, right - tx, r.Height), C(Tint, 1), time);
         ds.DrawText(Name, new Rect(tx, r.Y, Math.Max(0, right - tx - 70 * s), r.Height), C(Colors.White, 0.7f), label);

@@ -39,42 +39,44 @@ static class MediaView
     {
         var now = DateTime.Now;
         float pad = MathF.Max(14, timeSize * 0.6f) * s;
-        using var time = new CanvasTextFormat
+        var time = Fonts.Shared(new CanvasTextFormat
         {
             FontFamily = Fonts.Inter(FontWeights.SemiBold), FontSize = timeSize * s, FontWeight = FontWeights.SemiBold,
             VerticalAlignment = CanvasVerticalAlignment.Center, WordWrapping = CanvasWordWrapping.NoWrap,
-        };
-        using var date = new CanvasTextFormat
+        });
+        var date = Fonts.Shared(new CanvasTextFormat
         {
             FontFamily = Fonts.Inter(FontWeights.Medium), FontSize = MathF.Max(12, timeSize * 0.4f) * s, FontWeight = FontWeights.Medium,
             HorizontalAlignment = CanvasHorizontalAlignment.Right, VerticalAlignment = CanvasVerticalAlignment.Center, WordWrapping = CanvasWordWrapping.NoWrap,
-        };
+        });
         var box = new Rect(r.X + pad, r.Y, Math.Max(0, r.Width - 2 * pad), r.Height);
         Fonts.DrawTabular(ds, now.ToString(Settings.Current.Clock24h ? "HH:mm" : "h:mm", System.Globalization.CultureInfo.InvariantCulture), box, White(a), time);
         if (timeSize < 30) { ds.DrawText(now.ToString("ddd M/d", System.Globalization.CultureInfo.CurrentCulture), box, White(0.55f * a), date); return; }
         // The card: full date with the week number under it.
         float half = (float)box.Height / 2;
-        date.VerticalAlignment = CanvasVerticalAlignment.Bottom;
-        ds.DrawText(now.ToString("D", System.Globalization.CultureInfo.CurrentCulture), new Rect(box.X, box.Y, box.Width, half), White(0.7f * a), date);
-        date.VerticalAlignment = CanvasVerticalAlignment.Top;
-        date.FontSize = 12 * s;
-        ds.DrawText($"Week {System.Globalization.ISOWeek.GetWeekOfYear(now)}", new Rect(box.X, box.Y + half + 2 * s, box.Width, half), White(0.45f * a), date);
+        CanvasTextFormat Line(float size, CanvasVerticalAlignment v) => Fonts.Shared(new CanvasTextFormat // shared formats are never changed in place
+        {
+            FontFamily = date.FontFamily, FontSize = size, FontWeight = FontWeights.Medium,
+            HorizontalAlignment = CanvasHorizontalAlignment.Right, VerticalAlignment = v, WordWrapping = CanvasWordWrapping.NoWrap,
+        });
+        ds.DrawText(now.ToString("D", System.Globalization.CultureInfo.CurrentCulture), new Rect(box.X, box.Y, box.Width, half), White(0.7f * a), Line(date.FontSize, CanvasVerticalAlignment.Bottom));
+        ds.DrawText($"Week {System.Globalization.ISOWeek.GetWeekOfYear(now)}", new Rect(box.X, box.Y + half + 2 * s, box.Width, half), White(0.45f * a), Line(12 * s, CanvasVerticalAlignment.Top));
     }
 
     /// <summary>Expanded card: art, title, artist, progress bar and transport buttons.</summary>
     public static void DrawExpanded(CanvasDrawingSession ds, Rect r, float s, MediaSource m, double time, float a)
     {
         float x = (float)r.X, y = (float)r.Y, w = (float)r.Width;
-        using var title = new CanvasTextFormat
+        var title = Fonts.Shared(new CanvasTextFormat
         {
             FontFamily = Fonts.Inter(FontWeights.SemiBold), FontSize = 17 * s, FontWeight = FontWeights.SemiBold,
             WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character,
-        };
-        using var sub = new CanvasTextFormat
+        });
+        var sub = Fonts.Shared(new CanvasTextFormat
         {
             FontFamily = Fonts.Inter(FontWeights.Normal), FontSize = 14 * s,
             WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character,
-        };
+        });
 
         if (!m.HasSession)
         {
@@ -211,12 +213,12 @@ static class MediaView
         float k = EaseOut((float)Math.Clamp((time - _scrollAt) / 0.3, 0, 1));
         float pos = _scrollFrom + (index - _scrollFrom) * k; // fractional line in the middle
 
-        using var format = new CanvasTextFormat
+        var format = Fonts.Shared(new CanvasTextFormat
         {
             FontFamily = Fonts.Inter(FontWeights.SemiBold), FontSize = 13 * s, FontWeight = FontWeights.SemiBold,
             WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character,
             HorizontalAlignment = CanvasHorizontalAlignment.Right, VerticalAlignment = CanvasVerticalAlignment.Center,
-        };
+        });
         float lh = 20 * s, mid = (float)(box.Y + box.Height / 2);
         using (ds.CreateLayer(1f, box))
             for (int i = (int)MathF.Floor(pos) - 2; i <= (int)MathF.Ceiling(pos) + 2; i++)

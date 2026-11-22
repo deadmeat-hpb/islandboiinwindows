@@ -14,6 +14,22 @@ namespace DynamicIsland;
 static class Fonts
 {
     static readonly string Dir = Path.Combine(AppContext.BaseDirectory, "Fonts");
+    static readonly Dictionary<string, CanvasTextFormat> Formats = [];
+
+    /// <summary>
+    /// The one shared format equal to <paramref name="format"/> (disposed when an equal one exists); never dispose the result.
+    /// Win2D resolves a bundled-font URI through Windows.Storage each time a new format is first used: about 4 ms, and that
+    /// blocking call pumps window messages. Formats made per frame paid it every frame, and a mouse event handled inside the
+    /// pump, mid-render, made WinUI end the app (the 0xc000027b crashes). A shared format pays it once.
+    /// </summary>
+    public static CanvasTextFormat Shared(CanvasTextFormat format)
+    {
+        string key = $"{format.FontFamily}|{format.FontSize}|{format.FontWeight.Weight}|{format.HorizontalAlignment}|{format.VerticalAlignment}|{format.WordWrapping}|{format.TrimmingGranularity}|{format.TrimmingSign}";
+        if (Formats.TryGetValue(key, out var shared)) { format.Dispose(); return shared; }
+        if (Formats.Count >= 256) Formats.Clear(); // only if sizes keep changing; the dropped ones go to the GC, as a draw may still hold one
+        Formats[key] = format;
+        return format;
+    }
 
     /// <summary>A CanvasTextFormat family string for Inter at <paramref name="weight"/>; Segoe UI if the files are missing.</summary>
     public static string Inter(FontWeight weight)

@@ -322,9 +322,9 @@ static class HudView
         var tintC = e.Tint ?? ColorHelper.FromArgb(255, 150, 180, 255);
         Color T(float al) => ColorHelper.FromArgb((byte)Math.Clamp(al * 255 * a, 0, 255), tintC.R, tintC.G, tintC.B);
         using var glyph = new CanvasTextFormat { FontFamily = "Segoe Fluent Icons", FontSize = 18 * s, HorizontalAlignment = CanvasHorizontalAlignment.Center, VerticalAlignment = CanvasVerticalAlignment.Center };
-        using var title = new CanvasTextFormat { FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.SemiBold), FontSize = 15 * s, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character };
-        using var sub = new CanvasTextFormat { FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.Normal), FontSize = 12 * s, WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character };
-        using var value = new CanvasTextFormat { FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.SemiBold), FontSize = 13 * s, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = CanvasHorizontalAlignment.Right, VerticalAlignment = CanvasVerticalAlignment.Center };
+        var title = Fonts.Shared(new CanvasTextFormat { FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.SemiBold), FontSize = 15 * s, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character });
+        var sub = Fonts.Shared(new CanvasTextFormat { FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.Normal), FontSize = 12 * s, WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character });
+        var value = Fonts.Shared(new CanvasTextFormat { FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.SemiBold), FontSize = 13 * s, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = CanvasHorizontalAlignment.Right, VerticalAlignment = CanvasVerticalAlignment.Center });
 
         if (e.Kind is HudKind.Power or HudKind.Saver or HudKind.Bluetooth or HudKind.Wifi) { DrawNoticeCard(ds, r, s, e, a); return; }
         var icon = Icon(r, s);
@@ -353,7 +353,7 @@ static class HudView
                         var row = Row(r, s, i); var o = outputs[i];
                         if (o.IsDefault) ds.FillRoundedRectangle(row, 8 * s, 8 * s, T(0.16f));
                         ds.DrawText(o.IsDefault ? "" : "", new Rect(row.X + 4 * s, row.Y, 24 * s, row.Height), W(o.IsDefault ? 0.95f : 0.5f), glyph);
-                        using var name = new CanvasTextFormat { FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.Medium), FontSize = 12.5f * s, FontWeight = Microsoft.UI.Text.FontWeights.Medium, VerticalAlignment = CanvasVerticalAlignment.Center, WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character };
+                        var name = Fonts.Shared(new CanvasTextFormat { FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.Medium), FontSize = 12.5f * s, FontWeight = Microsoft.UI.Text.FontWeights.Medium, VerticalAlignment = CanvasVerticalAlignment.Center, WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character });
                         ds.DrawText(o.Name, new Rect(row.X + 34 * s, row.Y, row.Width - 40 * s, row.Height), W(o.IsDefault ? 1 : 0.7f), name);
                     }
                 return;
@@ -392,14 +392,14 @@ static class HudView
             _ => "Connected",
         };
         float tx = x + pad + bs + 14 * s, tw = (float)r.Right - pad - tx;
-        using var titleF = Text(15 * s, Microsoft.UI.Text.FontWeights.SemiBold);
-        using var subF = Text(12.5f * s, Microsoft.UI.Text.FontWeights.Normal);
+        var titleF = Text(15 * s, Microsoft.UI.Text.FontWeights.SemiBold);
+        var subF = Text(12.5f * s, Microsoft.UI.Text.FontWeights.Normal);
         ds.DrawText(title, new Rect(tx, y + 17 * s, tw, 22 * s), W(1), titleF);
         ds.DrawText(status, new Rect(tx, y + 39 * s, tw, 20 * s), W(0.55f), subF);
 
         // Value row: big number + gauge, left-aligned under the badge; the settings button sits at the right.
         float rowY = y + 82 * s, rowH = 44 * s;
-        using var big = Text(28 * s, Microsoft.UI.Text.FontWeights.SemiBold, CanvasVerticalAlignment.Center);
+        var big = Text(28 * s, Microsoft.UI.Text.FontWeights.SemiBold, CanvasVerticalAlignment.Center);
         switch (e.Kind)
         {
             case HudKind.Power:
@@ -436,11 +436,11 @@ static class HudView
 
     static Color Tint(Color c, float a) => ColorHelper.FromArgb((byte)Math.Clamp(a * 255, 0, 255), c.R, c.G, c.B);
 
-    static CanvasTextFormat Text(float size, Windows.UI.Text.FontWeight weight, CanvasVerticalAlignment v = CanvasVerticalAlignment.Top) => new()
+    static CanvasTextFormat Text(float size, Windows.UI.Text.FontWeight weight, CanvasVerticalAlignment v = CanvasVerticalAlignment.Top) => Fonts.Shared(new()
     {
         FontFamily = Fonts.Inter(weight), FontSize = size, FontWeight = weight, VerticalAlignment = v,
         WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character, TrimmingSign = CanvasTrimmingSign.Ellipsis,
-    };
+    });
 
     /// <summary>Tinted circle with the glyph (as on the built-in app notifications); <paramref name="pulse"/> adds a still halo ring while charging.</summary>
     static void Badge(CanvasDrawingSession ds, Rect r, float s, string glyph, Color c, float a, bool pulse)
@@ -493,7 +493,7 @@ static class HudView
     public static void DrawButton(CanvasDrawingSession ds, Rect b, float s, string text, float a)
     {
         ds.FillRoundedRectangle(b, (float)b.Height / 2, (float)b.Height / 2, ColorHelper.FromArgb((byte)(34 * a), 255, 255, 255));
-        using var f = new CanvasTextFormat { FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.Medium), FontSize = 12 * s, FontWeight = Microsoft.UI.Text.FontWeights.Medium, HorizontalAlignment = CanvasHorizontalAlignment.Center, VerticalAlignment = CanvasVerticalAlignment.Center, WordWrapping = CanvasWordWrapping.NoWrap };
+        var f = Fonts.Shared(new CanvasTextFormat { FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.Medium), FontSize = 12 * s, FontWeight = Microsoft.UI.Text.FontWeights.Medium, HorizontalAlignment = CanvasHorizontalAlignment.Center, VerticalAlignment = CanvasVerticalAlignment.Center, WordWrapping = CanvasWordWrapping.NoWrap });
         ds.DrawText(text, b, ColorHelper.FromArgb((byte)(235 * a), 255, 255, 255), f);
     }
 
@@ -510,12 +510,12 @@ static class HudView
             HorizontalAlignment = CanvasHorizontalAlignment.Center, VerticalAlignment = CanvasVerticalAlignment.Center,
         };
         if (e.Text.Length == 0) ds.DrawText(e.Glyph, new Rect(x + 8 * s, cy - 14 * s, 28 * s, 28 * s), tint, icon); // notices draw a badge instead
-        using var label = new CanvasTextFormat
+        var label = Fonts.Shared(new CanvasTextFormat
         {
             FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.SemiBold), FontSize = 13 * s, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             VerticalAlignment = CanvasVerticalAlignment.Center,
             WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character,
-        };
+        });
         float left = x + 44 * s;
 
         if (e.Text.Length == 0) // level bar (volume, brightness)
@@ -534,8 +534,8 @@ static class HudView
         float bs = 36 * s;
         Badge(ds, new Rect(x + 12 * s, cy - bs / 2, bs, bs), s, e.Glyph, c, a, pulse: charging);
         float tx = x + 60 * s, gaugeW = e.Kind == HudKind.Wifi ? 30 * s : e.Level >= 0 ? 74 * s : 0;
-        using var name = Text(13.5f * s, Microsoft.UI.Text.FontWeights.SemiBold);
-        using var status = Text(11.5f * s, Microsoft.UI.Text.FontWeights.Normal);
+        var name = Text(13.5f * s, Microsoft.UI.Text.FontWeights.SemiBold);
+        var status = Text(11.5f * s, Microsoft.UI.Text.FontWeights.Normal);
         string line = e.Kind switch { HudKind.Power => charging ? "Plugged in" : e.Text == "On battery" ? "Unplugged" : "Plug in soon", HudKind.Saver => e.Text.EndsWith("on") ? "Battery lasts longer" : "Full performance", HudKind.Bluetooth => "Connected", _ => $"{Signal(e.Level)} signal" };
         ds.DrawText(e.Text, new Rect(tx, cy - 18 * s, right - tx - gaugeW - 8 * s, 20 * s), white, name);
         ds.DrawText(line, new Rect(tx, cy + 1 * s, right - tx - gaugeW - 8 * s, 18 * s), ColorHelper.FromArgb((byte)(150 * a), 255, 255, 255), status);
@@ -551,8 +551,12 @@ static class HudView
         }
         if (e.Level < 0) return;
         DrawCapsule(ds, new Rect(right - 30 * s, cy - 7 * s, 26 * s, 14 * s), s, e.Level, c, charging, a);
-        using var pct = Text(13 * s, Microsoft.UI.Text.FontWeights.SemiBold, CanvasVerticalAlignment.Center);
-        pct.HorizontalAlignment = CanvasHorizontalAlignment.Right;
+        var pct = Fonts.Shared(new CanvasTextFormat
+        {
+            FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.SemiBold), FontSize = 13 * s, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            HorizontalAlignment = CanvasHorizontalAlignment.Right, VerticalAlignment = CanvasVerticalAlignment.Center,
+            WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character, TrimmingSign = CanvasTrimmingSign.Ellipsis,
+        });
         Fonts.DrawTabular(ds, e.Value, new Rect(right - 78 * s, cy - 12 * s, 42 * s, 24 * s), white, pct);
     }
 }

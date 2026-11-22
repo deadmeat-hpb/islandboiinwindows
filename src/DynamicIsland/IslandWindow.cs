@@ -936,12 +936,12 @@ public sealed class IslandWindow : Window
     void DrawClock(CanvasDrawingSession ds, Windows.Foundation.Rect rect, float alpha)
     {
         var now = DateTime.Now;
-        using var format = new Microsoft.Graphics.Canvas.Text.CanvasTextFormat
+        var format = Fonts.Shared(new Microsoft.Graphics.Canvas.Text.CanvasTextFormat
         {
             FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.SemiBold), FontSize = (_mode == Mode.Hover ? 12 : 11) * _s, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             HorizontalAlignment = Microsoft.Graphics.Canvas.Text.CanvasHorizontalAlignment.Center, VerticalAlignment = Microsoft.Graphics.Canvas.Text.CanvasVerticalAlignment.Center,
             WordWrapping = Microsoft.Graphics.Canvas.Text.CanvasWordWrapping.NoWrap,
-        };
+        });
         var set = Settings.Current;
         string time = set.Clock24h ? now.ToString("HH:mm", CultureInfo.InvariantCulture) : now.ToString("h:mm tt", CultureInfo.InvariantCulture);
         string text = set.ShowDate ? $"{time}  ·  {now.ToString("ddd M/d", CultureInfo.CurrentCulture)}" : time;

@@ -79,7 +79,7 @@ static partial class NotificationView
     static float ClaudeCardH(IslandNotification n)
     {
         if (n.Body.Length == 0) return 46 + 22 + 18;
-        using var f = Format(13, FontWeights.Normal, wrap: true);
+        var f = Format(13, FontWeights.Normal, wrap: true);
         using var layout = new CanvasTextLayout(CanvasDevice.GetSharedDevice(), n.Body, f, CardW - 32 - 28, 90);
         return 46 + 30 + MathF.Min((float)layout.LayoutBounds.Height, 90) + 16 + 16;
     }
@@ -90,7 +90,7 @@ static partial class NotificationView
         float h = 46 + 24;
         if (n.Body.Length > 0)
         {
-            using var f = Format(13, FontWeights.Normal, wrap: true);
+            var f = Format(13, FontWeights.Normal, wrap: true);
             using var layout = new CanvasTextLayout(CanvasDevice.GetSharedDevice(), n.Body, f, CardW - 32 - 62, 40);
             h += MathF.Min((float)layout.LayoutBounds.Height, 40);
         }
@@ -102,14 +102,14 @@ static partial class NotificationView
     static Color Tint(Color c, float a) => ColorHelper.FromArgb((byte)Math.Clamp(a * 255, 0, 255), c.R, c.G, c.B);
     static readonly Color Cool = ColorHelper.FromArgb(255, 150, 180, 255);
 
-    static CanvasTextFormat Format(float size, FontWeight weight, bool wrap = false, CanvasHorizontalAlignment h = CanvasHorizontalAlignment.Left, CanvasVerticalAlignment v = CanvasVerticalAlignment.Top) => new()
+    static CanvasTextFormat Format(float size, FontWeight weight, bool wrap = false, CanvasHorizontalAlignment h = CanvasHorizontalAlignment.Left, CanvasVerticalAlignment v = CanvasVerticalAlignment.Top) => Fonts.Shared(new()
     {
         FontFamily = Fonts.Inter(weight), FontSize = size, FontWeight = weight,
         WordWrapping = wrap ? CanvasWordWrapping.WholeWord : CanvasWordWrapping.NoWrap,
         TrimmingGranularity = wrap ? CanvasTextTrimmingGranularity.Word : CanvasTextTrimmingGranularity.Character,
         HorizontalAlignment = h, VerticalAlignment = v,
         TrimmingSign = CanvasTrimmingSign.Ellipsis,
-    };
+    });
 
     static void Icon(CanvasDrawingSession ds, IslandNotification n, Rect r, float a, bool round)
     {
@@ -157,12 +157,12 @@ static partial class NotificationView
         else if (kind == NoteKind.Outlook) Avatar(ds, iconRect, s, n, a);
         else Icon(ds, n, iconRect, a, kind is NoteKind.Message or NoteKind.Call);
         float tx = x + 70 * s, tw = w - 86 * s;
-        using var title = Format(15 * s, FontWeights.SemiBold);
-        using var body = Format(13 * s, FontWeights.Normal);
+        var title = Format(15 * s, FontWeights.SemiBold);
+        var body = Format(13 * s, FontWeights.Normal);
 
         if (kind == NoteKind.Dpi)
         {
-            using var big = Format(22 * s, FontWeights.SemiBold, v: CanvasVerticalAlignment.Center);
+            var big = Format(22 * s, FontWeights.SemiBold, v: CanvasVerticalAlignment.Center);
             ds.DrawText("DPI", new Rect(tx, y, 50 * s, h), White(0.55f * a), Format(13 * s, FontWeights.SemiBold, v: CanvasVerticalAlignment.Center));
             Fonts.DrawTabular(ds, DpiValue(n), new Rect(tx + 38 * s, y, tw - 38 * s, h), White(a), big);
             return;
@@ -191,7 +191,7 @@ static partial class NotificationView
             bool badge = Badge(n) is not null; // built-in apps: the big glyph badge below stands in for the icon
             if (!badge) Icon(ds, n, new Rect(x + pad, y + 14 * s, 22 * s, 22 * s), a, false);
             float hx = badge ? 4 * s : 30 * s;
-            using var app = Format(12 * s, FontWeights.Medium, v: CanvasVerticalAlignment.Center);
+            var app = Format(12 * s, FontWeights.Medium, v: CanvasVerticalAlignment.Center);
             string site = kind == NoteKind.Web ? SplitSite(n).Site : "";
             ds.DrawText($"{n.App}{(site.Length > 0 ? "  ·  " + site : "")}  ·  {When(n)}", new Rect(x + pad + hx, y + 13 * s, tw - hx, 24 * s), White(0.47f * a), app);
         }
@@ -201,9 +201,9 @@ static partial class NotificationView
         {
             case NoteKind.Message: // sender, then the message in a soft bubble
             {
-                using var name = Format(15 * s, FontWeights.SemiBold);
+                var name = Format(15 * s, FontWeights.SemiBold);
                 ds.DrawText(n.Title.Length > 0 ? n.Title : n.App, new Rect(x + pad, top, tw, 22 * s), White(a), name);
-                using var msg = Format(13.5f * s, FontWeights.Normal, wrap: true);
+                var msg = Format(13.5f * s, FontWeights.Normal, wrap: true);
                 string text = n.Body.Length > 0 ? n.Body : "New message";
                 using var layout = new CanvasTextLayout(ds, text, msg, tw - 24 * s, bottom - top - 44 * s);
                 float bh = MathF.Min((float)layout.LayoutBounds.Height, bottom - top - 44 * s) + 16 * s;
@@ -215,9 +215,9 @@ static partial class NotificationView
             case NoteKind.Mail: // sender, bold subject, preview
             {
                 var lines = n.Body.Split('\n', 2);
-                using var from = Format(13 * s, FontWeights.Medium);
-                using var subject = Format(15 * s, FontWeights.SemiBold);
-                using var preview = Format(13 * s, FontWeights.Normal, wrap: true);
+                var from = Format(13 * s, FontWeights.Medium);
+                var subject = Format(15 * s, FontWeights.SemiBold);
+                var preview = Format(13 * s, FontWeights.Normal, wrap: true);
                 ds.DrawText(n.Title.Length > 0 ? n.Title : n.App, new Rect(x + pad, top, tw, 20 * s), White(0.75f * a), from);
                 ds.DrawText(lines[0], new Rect(x + pad, top + 22 * s, tw, 22 * s), White(a), subject);
                 Block(ds, lines.Length > 1 ? lines[1] : "", new Rect(x + pad, top + 48 * s, tw, bottom - top - 48 * s), White(0.62f * a), preview);
@@ -228,15 +228,15 @@ static partial class NotificationView
                 string status = ClaudeStatus(n);
                 if (status.Length > 0)
                 {
-                    using var chip = Format(11.5f * s, FontWeights.SemiBold, h: CanvasHorizontalAlignment.Center, v: CanvasVerticalAlignment.Center);
+                    var chip = Format(11.5f * s, FontWeights.SemiBold, h: CanvasHorizontalAlignment.Center, v: CanvasVerticalAlignment.Center);
                     using var ctl = new CanvasTextLayout(ds, status, chip, tw, 22 * s);
                     float chw = (float)ctl.LayoutBounds.Width + 20 * s;
                     var cr = new Rect(x + w - pad - chw, y + 14 * s, chw, 22 * s);
                     ds.FillRoundedRectangle(cr, 11 * s, 11 * s, Tint(ClaudeOrange, 0.22f * a));
                     ds.DrawText(status, cr, Tint(ClaudeOrange, a), chip);
                 }
-                using var title = Format(15 * s, FontWeights.SemiBold);
-                using var text = Format(13 * s, FontWeights.Normal, wrap: true);
+                var title = Format(15 * s, FontWeights.SemiBold);
+                var text = Format(13 * s, FontWeights.Normal, wrap: true);
                 ds.DrawText(n.Title.Length > 0 ? n.Title : n.App, new Rect(x + pad, top, tw, 22 * s), White(a), title);
                 if (n.Body.Length > 0)
                 {
@@ -255,9 +255,9 @@ static partial class NotificationView
                 var lines = n.Body.Split('\n', 2);
                 float av = 40 * s, tx = x + pad + av + 12 * s, cw = tw - av - 12 * s;
                 Avatar(ds, new Rect(x + pad, top, av, av), s, n, a);
-                using var from = Format(15 * s, FontWeights.SemiBold);
-                using var subject = Format(13.5f * s, FontWeights.Medium);
-                using var preview = Format(13 * s, FontWeights.Normal, wrap: true);
+                var from = Format(15 * s, FontWeights.SemiBold);
+                var subject = Format(13.5f * s, FontWeights.Medium);
+                var preview = Format(13 * s, FontWeights.Normal, wrap: true);
                 ds.DrawText(n.Title.Length > 0 ? n.Title : n.App, new Rect(tx, top - 1 * s, cw, 22 * s), White(a), from);
                 ds.DrawText(lines[0].Length > 0 ? lines[0] : "New email", new Rect(tx, top + 21 * s, cw, 20 * s), Tint(OutlookBlue, a), subject);
                 Block(ds, lines.Length > 1 ? lines[1] : "", new Rect(x + pad, top + 52 * s, tw, bottom - top - 52 * s), White(0.62f * a), preview);
@@ -267,8 +267,8 @@ static partial class NotificationView
             {
                 ds.FillRoundedRectangle(x + pad, top + 2 * s, 4 * s, bottom - top - 4 * s, 2 * s, 2 * s, Tint(accent, 0.9f * a));
                 float cx = x + pad + 14 * s, cw = tw - 14 * s;
-                using var title = Format(16 * s, FontWeights.SemiBold);
-                using var detail = Format(13 * s, FontWeights.Normal);
+                var title = Format(16 * s, FontWeights.SemiBold);
+                var detail = Format(13 * s, FontWeights.Normal);
                 ds.DrawText(n.Title.Length > 0 ? n.Title : n.App, new Rect(cx, top, cw, 24 * s), White(a), title);
                 var lines = n.Body.Split('\n');
                 string time = lines.FirstOrDefault(l => Clock().IsMatch(l)) ?? (lines.Length > 0 ? lines[0] : "");
@@ -284,8 +284,8 @@ static partial class NotificationView
                 for (int k = 1; k <= 2; k++) // still halo rings around the caller (static: no redraws while it rings)
                     ds.DrawCircle(ax + av / 2, ay + av / 2, av / 2 + k * 5 * s, Tint(accent, (0.5f - k * 0.17f) * a), 1.5f * s);
                 Icon(ds, n, new Rect(ax, ay, av, av), a, true);
-                using var who = Format(18 * s, FontWeights.SemiBold);
-                using var what = Format(13 * s, FontWeights.Normal);
+                var who = Format(18 * s, FontWeights.SemiBold);
+                var what = Format(13 * s, FontWeights.Normal);
                 ds.DrawText(n.Title.Length > 0 ? n.Title : n.App, new Rect(ax + av + 16 * s, ay + 6 * s, tw - av - 16 * s, 26 * s), White(a), who);
                 ds.DrawText($"{n.App} · {(n.Body.Length > 0 ? n.Body.Split('\n')[0] : "Incoming call")}", new Rect(ax + av + 16 * s, ay + 32 * s, tw - av - 16 * s, 20 * s), White(0.6f * a), what);
                 break;
@@ -296,8 +296,8 @@ static partial class NotificationView
                 float bs = 40 * s;
                 DrawBadge(ds, new Rect(x + pad, top, bs, bs), s, b, a, false);
                 float tx = x + pad + bs + 12 * s, cw = tw - bs - 12 * s;
-                using var title = Format(15 * s, FontWeights.SemiBold);
-                using var sub = Format(12.5f * s, FontWeights.Normal);
+                var title = Format(15 * s, FontWeights.SemiBold);
+                var sub = Format(12.5f * s, FontWeights.Normal);
                 ds.DrawText(n.Title.Length > 0 ? n.Title : "Screenshot", new Rect(tx, top - 1 * s, cw, 22 * s), White(a), title);
                 string status = n.Body.Length > 0 ? n.Body.Replace('\n', ' ')
                     : n.Thumb is not null && !n.Title.Contains("clipboard", StringComparison.OrdinalIgnoreCase) ? "Copied to clipboard" : "Click to mark up";
@@ -324,9 +324,9 @@ static partial class NotificationView
                 string time = lines.Select(l => Clock().Match(l)).FirstOrDefault(m => m.Success)?.Value ?? (timer ? "Time's up" : DateTime.Now.ToString("HH:mm"));
                 string label = lines.FirstOrDefault(l => !Clock().IsMatch(l)) ?? n.App;
                 string detail = string.Join("  ·  ", lines.Where(l => l != label && !Clock().IsMatch(l)));
-                using var big = Format(30 * s, FontWeights.SemiBold);
-                using var name = Format(14 * s, FontWeights.SemiBold);
-                using var sub = Format(12.5f * s, FontWeights.Normal);
+                var big = Format(30 * s, FontWeights.SemiBold);
+                var name = Format(14 * s, FontWeights.SemiBold);
+                var sub = Format(12.5f * s, FontWeights.Normal);
                 Fonts.DrawTabular(ds, time, new Rect(tx, by - 8 * s, cw, 40 * s), White(a), big);
                 ds.DrawText(label, new Rect(tx, by + 32 * s, cw, 20 * s), Tint(b.Color, a), name);
                 ds.DrawText(detail.Length > 0 ? detail : "Click to open Clock", new Rect(tx, by + 52 * s, cw, 18 * s), White(0.55f * a), sub);
@@ -338,8 +338,8 @@ static partial class NotificationView
                 float bs = 48 * s;
                 DrawBadge(ds, new Rect(x + pad, top + 2 * s, bs, bs), s, b, a, false);
                 float tx = x + pad + bs + 14 * s, cw = tw - bs - 14 * s;
-                using var title = Format(15 * s, FontWeights.SemiBold);
-                using var text = Format(13 * s, FontWeights.Normal, wrap: true);
+                var title = Format(15 * s, FontWeights.SemiBold);
+                var text = Format(13 * s, FontWeights.Normal, wrap: true);
                 ds.DrawText(n.Title.Length > 0 ? n.Title : n.App, new Rect(tx, top, cw, 22 * s), White(a), title);
                 float chipH = b.Chip.Length > 0 && !n.Title.Contains(b.Chip, StringComparison.OrdinalIgnoreCase) ? 24 * s : 0; // no chip that just repeats the title
                 float bodyMax = bottom - top - 24 * s - (chipH > 0 ? chipH + 10 * s : 0);
@@ -348,7 +348,7 @@ static partial class NotificationView
                 Block(ds, n.Body, new Rect(tx, top + 24 * s, cw, bodyMax), White(0.65f * a), text);
                 if (chipH > 0)
                 {
-                    using var chip = Format(12 * s, FontWeights.SemiBold, h: CanvasHorizontalAlignment.Center, v: CanvasVerticalAlignment.Center);
+                    var chip = Format(12 * s, FontWeights.SemiBold, h: CanvasHorizontalAlignment.Center, v: CanvasVerticalAlignment.Center);
                     using var tl = new CanvasTextLayout(ds, b.Chip, chip, cw, chipH);
                     var cr = new Rect(tx, top + 24 * s + bodyH + 10 * s, (float)tl.LayoutBounds.Width + 22 * s, chipH);
                     ds.FillRoundedRectangle(cr, chipH / 2, chipH / 2, Tint(b.Color, 0.22f * a));
@@ -363,8 +363,8 @@ static partial class NotificationView
                 ds.FillCircle(x + pad + 26 * s, cy, 26 * s, Tint(logi, 0.18f * a));
                 using var glyph = new CanvasTextFormat { FontFamily = "Segoe Fluent Icons", FontSize = 24 * s, HorizontalAlignment = CanvasHorizontalAlignment.Center, VerticalAlignment = CanvasVerticalAlignment.Center };
                 ds.DrawText("", new Rect(x + pad, cy - 26 * s, 52 * s, 52 * s), White(0.95f * a), glyph);
-                using var label = Format(12 * s, FontWeights.Medium);
-                using var big = Format(34 * s, FontWeights.SemiBold, v: CanvasVerticalAlignment.Center);
+                var label = Format(12 * s, FontWeights.Medium);
+                var big = Format(34 * s, FontWeights.SemiBold, v: CanvasVerticalAlignment.Center);
                 float tx = x + pad + 70 * s;
                 ds.DrawText($"{n.App} · DPI", new Rect(tx, cy - 32 * s, tw - 70 * s, 18 * s), White(0.5f * a), label);
                 Fonts.DrawTabular(ds, DpiValue(n), new Rect(tx, cy - 16 * s, tw - 70 * s, 44 * s), White(a), big);
@@ -372,8 +372,8 @@ static partial class NotificationView
             }
             default: // generic and web push (the site is in the header)
             {
-                using var title = Format(15 * s, FontWeights.SemiBold, wrap: true);
-                using var text = Format(13 * s, FontWeights.Normal, wrap: true);
+                var title = Format(15 * s, FontWeights.SemiBold, wrap: true);
+                var text = Format(13 * s, FontWeights.Normal, wrap: true);
                 string head = n.Title.Length > 0 ? n.Title : n.App;
                 string bodyText = kind == NoteKind.Web ? SplitSite(n).Body : n.Body;
                 using var tl = new CanvasTextLayout(ds, head, title, tw, 42 * s);
@@ -414,7 +414,7 @@ static partial class NotificationView
             ds.DrawText("", r, Tint(OutlookBlue, a), glyph);
             return;
         }
-        using var f = Format(rad * 0.75f, FontWeights.SemiBold, h: CanvasHorizontalAlignment.Center, v: CanvasVerticalAlignment.Center);
+        var f = Format(rad * 0.75f, FontWeights.SemiBold, h: CanvasHorizontalAlignment.Center, v: CanvasVerticalAlignment.Center);
         ds.DrawText(initials, r, White(0.95f * a), f);
     }
 
