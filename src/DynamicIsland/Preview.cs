@@ -133,5 +133,24 @@ static class Preview
             using var file = File.Create(Path.Combine(dir, $"call-{call.App}.png".ToLowerInvariant()));
             target.SaveAsync(file.AsRandomAccessStream(), CanvasBitmapFileFormat.Png).AsTask().Wait();
         }
+
+        // The lyric list at its size in the music card, current line long enough to wrap.
+        {
+            (TimeSpan, string)[] lines =
+            [
+                (TimeSpan.Zero, "We left the lights on by the harbour"),
+                (TimeSpan.Zero, "And every window down the long road home was singing back the same slow song to us"),
+                (TimeSpan.Zero, "Till morning came"),
+            ];
+            float bw = (400 - 118) * 0.6f * s - 12 * s;
+            using var target = new CanvasRenderTarget(device, bw + 40 * s, 106 * s, 96);
+            using (var ds = target.CreateDrawingSession())
+            {
+                ds.Clear(Color.FromArgb(255, 22, 22, 24));
+                MediaView.DrawLyricList(ds, new Rect(20 * s, 20 * s, bw, 66 * s), s, lines, 1, 1000, 1);
+            }
+            using var file = File.Create(Path.Combine(dir, "lyrics.png"));
+            target.SaveAsync(file.AsRandomAccessStream(), CanvasBitmapFileFormat.Png).AsTask().Wait();
+        }
     }
 }

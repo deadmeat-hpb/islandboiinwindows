@@ -90,7 +90,7 @@ static class MediaView
         bool hasLyrics = m.Lyrics.Count > 0;
         if (hasLyrics != _hadLyrics) { (_hadLyrics, _lyricsAt) = (hasLyrics, time); }
         float lp = EaseOut((float)Math.Clamp((time - _lyricsAt) / 0.4, 0, 1)), L = hasLyrics ? lp : 1 - lp;
-        float textW = w - 118 * s, tw = textW * (1 - 0.5f * L);
+        float textW = w - 118 * s, tw = textW * (1 - LyricShare * L);
         TitleScrolls = false;
         Slide(m, 28 * s, a, (dx, al, art, t, ar) =>
         {
@@ -102,7 +102,7 @@ static class MediaView
         if (L > 0.01f && (hasLyrics || _lastLyrics.Count > 0))
         {
             if (hasLyrics) _lastLyrics = m.Lyrics; // keep drawing the old list while it slides out
-            var box = new Rect(x + 98 * s + textW * 0.5f + 12 * s, y + 14 * s + (1 - L) * 18 * s, textW * 0.5f - 12 * s, 60 * s);
+            var box = new Rect(x + 98 * s + textW * (1 - LyricShare) + 12 * s, y + 10 * s + (1 - L) * 18 * s, textW * LyricShare - 12 * s, 66 * s);
             DrawLyricList(ds, box, s, _lastLyrics, hasLyrics ? m.LyricIndex : _lastIndex, time, a * L);
         }
 
@@ -203,7 +203,7 @@ static class MediaView
     /// Apple Music-style lyric list: the current line bright in the middle, the previous and next lines faded above and below.
     /// A new line scrolls the list up over ~0.3 s; a jump (seek, new song) moves straight there.
     /// </summary>
-    static void DrawLyricList(CanvasDrawingSession ds, Rect box, float s, IReadOnlyList<(TimeSpan At, string Text)> lines, int index, double time, float a)
+    internal static void DrawLyricList(CanvasDrawingSession ds, Rect box, float s, IReadOnlyList<(TimeSpan At, string Text)> lines, int index, double time, float a)
     {
         if (index != _lastIndex)
         {
@@ -213,13 +213,19 @@ static class MediaView
         float k = EaseOut((float)Math.Clamp((time - _scrollAt) / 0.3, 0, 1));
         float pos = _scrollFrom + (index - _scrollFrom) * k; // fractional line in the middle
 
-        var format = Fonts.Shared(new CanvasTextFormat
+        float lh = 20 * s, mid = (float)(box.Y + box.Height / 2), bw = (float)box.Width;
+        // A long line shrinks first (to 3/4 size at most). The line being sung then wraps onto up to three lines so all of it
+        // shows, and its neighbours move apart to make room; the faded neighbours stay one line, ending in "…".
+        (float Scale, int Rows) Fit(string text)
         {
-            FontFamily = Fonts.Inter(FontWeights.SemiBold), FontSize = 13 * s, FontWeight = FontWeights.SemiBold,
-            WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character,
-            HorizontalAlignment = CanvasHorizontalAlignment.Right, VerticalAlignment = CanvasVerticalAlignment.Center,
-        });
-        float lh = 20 * s, mid = (float)(box.Y + box.Height / 2);
+            float natural = LyricWidth(ds, text, s), scale = MathF.Floor(Math.Clamp(bw / natural, 0.75f, 1f) * 20) / 20;
+            return (scale, Math.Clamp((int)MathF.Ceiling(natural * scale / (bw * 0.97f)), 1, 3)); // a little slack: words don't break at the exact width
+        }
+        static string Text(IReadOnlyList<(TimeSpan At, string Text)> lines, int i) => lines[i].Text.Length > 0 ? lines[i].Text : "♪";
+        int sung = Math.Clamp((int)MathF.Round(pos), 0, Math.Max(0, lines.Count - 1));
+        var sungFit = lines.Count > 0 ? Fit(Text(lines, sung)) : (1f, 1);
+        float rowH = 16 * s * sungFit.Item1, sungH = sungFit.Item2 == 1 ? lh : sungFit.Item2 * rowH + 4 * s;
+        float spread = MathF.Max(0, sungH - lh) / 2 * (1 - MathF.Min(MathF.Abs(pos - sung) * 2, 1)); // eases out as the next line takes over
         using (ds.CreateLayer(1f, box))
             for (int i = (int)MathF.Floor(pos) - 2; i <= (int)MathF.Ceiling(pos) + 2; i++)
             {
@@ -228,9 +234,30 @@ static class MediaView
                 float alpha = 1 - 0.65f * MathF.Min(dist, 1);                 // neighbours faded
                 alpha *= Math.Clamp((1.9f - dist) / 0.6f, 0, 1);               // soft fade toward the top and bottom edges
                 if (alpha <= 0.01f) continue;
-                string text = lines[i].Text.Length > 0 ? lines[i].Text : "♪";
-                ds.DrawText(text, new Rect(box.X, mid + d * lh - lh / 2, box.Width, lh), White(alpha * a), format);
+                var (scale, rows) = i == sung ? sungFit : (Fit(Text(lines, i)).Scale, 1);
+                float h = i == sung ? sungH : lh, y = mid + d * lh + MathF.Sign(i - sung) * spread;
+                ds.DrawText(Text(lines, i), new Rect(box.X, y - h / 2, bw, h), White(alpha * a), LyricFormat(13 * s * scale, rows > 1));
             }
+    }
+
+    /// <summary>The share of the card's text column the lyrics take while they show (the title keeps the rest and scrolls).</summary>
+    const float LyricShare = 0.6f;
+    static readonly Dictionary<(string, float), float> _lyricWidths = [];
+
+    static CanvasTextFormat LyricFormat(float size, bool wrap) => Fonts.Shared(new CanvasTextFormat
+    {
+        FontFamily = Fonts.Inter(FontWeights.SemiBold), FontSize = size, FontWeight = FontWeights.SemiBold,
+        WordWrapping = wrap ? CanvasWordWrapping.WholeWord : CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character,
+        TrimmingSign = CanvasTrimmingSign.Ellipsis, HorizontalAlignment = CanvasHorizontalAlignment.Right, VerticalAlignment = CanvasVerticalAlignment.Center,
+    });
+
+    /// <summary>A lyric line's width at full size, measured once per line and size.</summary>
+    static float LyricWidth(CanvasDrawingSession ds, string text, float s)
+    {
+        if (_lyricWidths.TryGetValue((text, s), out float known)) return known;
+        if (_lyricWidths.Count > 400) _lyricWidths.Clear(); // a few songs' worth
+        using var layout = new CanvasTextLayout(ds, text, LyricFormat(13 * s, false), 100000, 40 * s);
+        return _lyricWidths[(text, s)] = MathF.Max(1, (float)layout.LayoutBounds.Width);
     }
 
     /// <summary>Where the progress bar is being dragged to (0..1), or null when it isn't.</summary>
