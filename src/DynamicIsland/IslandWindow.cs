@@ -189,6 +189,8 @@ public sealed class IslandWindow : Window
         HudKind.Privacy => Settings.Current.Privacy,
         HudKind.Keys => Settings.Current.CapsLock,
         HudKind.Clipboard => Settings.Current.Clipboard,
+        HudKind.Download => Settings.Current.Downloads,
+        HudKind.Focus or HudKind.Airplane => Settings.Current.FocusAirplane,
         _ => true,
     };
 
@@ -764,11 +766,15 @@ public sealed class IslandWindow : Window
         }
         if (_mode == Mode.Hud && _hud is { } hud)
         {
-            if (hud.Kind is HudKind.Privacy or HudKind.Keys or HudKind.Clipboard) // no card: a mic / camera pill opens its privacy page, the others just go
+            if (!HudView.HasCard(hud.Kind)) // no card: the pill opens its page (privacy, Clock, airplane mode) or shows the download; Caps Lock and Copied just go
             {
-                if (hud.Kind == HudKind.Privacy && hud.Settings is { } privacy)
-                    try { Process.Start(new ProcessStartInfo(privacy) { UseShellExecute = true }); }
-                    catch (Exception ex) { Debug.WriteLine($"Couldn't open {privacy}: {ex.Message}"); }
+                if (hud.Settings is { } target)
+                    try
+                    {
+                        if (hud.Kind == HudKind.Download) Process.Start("explorer.exe", $"/select,\"{target}\""); // the file, selected in its folder (not run)
+                        else Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
+                    }
+                    catch (Exception ex) { Debug.WriteLine($"Couldn't open {target}: {ex.Message}"); }
                 _hudUntil = 0;
                 _dirty = true;
                 return;

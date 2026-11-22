@@ -117,6 +117,8 @@ public sealed class SettingsWindow : Window
                 page.Children.Add(Card("", "Microphone and camera", "A dot on the island while an app uses them, and which app when it starts.", Toggle(s => s.Privacy, (s, v) => s.Privacy = v)));
                 page.Children.Add(Card("", "Caps Lock", "Caps Lock turning on or off.", Toggle(s => s.CapsLock, (s, v) => s.CapsLock = v)));
                 page.Children.Add(Card("", "Copied", "What you copy, in one line. Private copies from password managers are never shown.", Toggle(s => s.Clipboard, (s, v) => s.Clipboard = v)));
+                page.Children.Add(Card("\uE896", "Downloads", "A file finishing in Downloads; click it to see the file in its folder.", Toggle(s => s.Downloads, (s, v) => s.Downloads = v)));
+                page.Children.Add(Card("\uE709", "Focus and airplane mode", "A Focus session starting or ending, and airplane mode on or off.", Toggle(s => s.FocusAirplane, (s, v) => s.FocusAirplane = v)));
                 page.Children.Add(Card("", "Clock timers", "Minimise Clock while a timer or the stopwatch runs and it keeps counting in the island.", Toggle(s => s.ClockTimers, (s, v) => s.ClockTimers = v)));
                 page.Children.Add(Section("Behaviour"));
                 page.Children.Add(Card("", "Resting island", "What the island shows when nothing is happening.",

@@ -30,6 +30,8 @@ sealed class Settings
     public bool Privacy { get; set; } = true;
     public bool CapsLock { get; set; } = true;
     public bool Clipboard { get; set; } = true;
+    public bool Downloads { get; set; } = true;
+    public bool FocusAirplane { get; set; } = true;
     public bool IdleClock { get; set; } = true;
     public int NotificationSeconds { get; set; } = 5;
     public bool HideInFullscreen { get; set; }

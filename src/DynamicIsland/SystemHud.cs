@@ -21,7 +21,7 @@ namespace DynamicIsland;
 /// </summary>
 sealed record HudEvent(string Glyph, float Level, string Value, string Text = "", Windows.UI.Color? Tint = null, double Seconds = 1.6, string? Settings = null, HudKind Kind = HudKind.Volume, string? Detail = null);
 
-enum HudKind { Volume, Brightness, Power, Bluetooth, Wifi, Saver, Privacy, Keys, Clipboard }
+enum HudKind { Volume, Brightness, Power, Bluetooth, Wifi, Saver, Privacy, Keys, Clipboard, Download, Focus, Airplane }
 
 /// <summary>An audio output the volume card can switch to.</summary>
 sealed record AudioOutput(string Id, string Name, bool IsDefault);
@@ -117,6 +117,9 @@ sealed class SystemHud(DispatcherQueue ui)
 
         StartBluetooth();
         StartPrivacy();
+        StartDownloads();
+        StartFocus();
+        StartAirplane();
         NetworkInformation.NetworkStatusChanged += _ => ui.TryEnqueue(CheckWifi);
         CheckWifi(); // remember the current network so we only announce changes
     }
@@ -289,6 +292,95 @@ sealed class SystemHud(DispatcherQueue ui)
         catch (Exception ex) { Crash.Log("Privacy scan", ex); }
     }
 
+    // ---- Downloads finishing, Windows Focus sessions, airplane mode ----
+
+    FileSystemWatcher? _downloads;
+    readonly Dictionary<string, DateTime> _downloadShown = [];
+    static readonly string[] Partial = [".crdownload", ".part", ".partial", ".download", ".tmp", ".opdownload"];
+
+    /// <summary>
+    /// A file finishing in Downloads. Browsers write "name.crdownload" / ".part" and rename it when done, so a rename out of a
+    /// partial name is the finish; a file created under its final name (a save, a copy) counts too. Event-driven, nothing polls.
+    /// </summary>
+    void StartDownloads()
+    {
+        try
+        {
+            var id = new Guid("374de290-123f-4565-9164-39c4925e467b"); // FOLDERID_Downloads (follows a moved Downloads folder)
+            if (Native.SHGetKnownFolderPath(ref id, 0, 0, out nint ptr) != 0) return;
+            string dir = System.Runtime.InteropServices.Marshal.PtrToStringUni(ptr) ?? "";
+            System.Runtime.InteropServices.Marshal.FreeCoTaskMem(ptr);
+            if (!Directory.Exists(dir)) return;
+            _downloads = new FileSystemWatcher(dir) { NotifyFilter = NotifyFilters.FileName, EnableRaisingEvents = true };
+            _downloads.Renamed += (_, e) => { if (IsPartial(e.OldName) && !IsPartial(e.Name)) Finished(e.FullPath); };
+            _downloads.Created += (_, e) => { if (!IsPartial(e.Name)) Finished(e.FullPath); };
+        }
+        catch (Exception ex) { Crash.Log("Downloads watch", ex); }
+    }
+
+    static bool IsPartial(string? name) => name is null || name.StartsWith('.') || name.StartsWith('~') || Partial.Any(x => name.EndsWith(x, StringComparison.OrdinalIgnoreCase))
+        || name.StartsWith("Unconfirmed ", StringComparison.OrdinalIgnoreCase); // Chrome's name while it asks
+
+    async void Finished(string path)
+    {
+        try
+        {
+            await Task.Delay(800); // Created fires before the copy is written; Chrome also deletes and re-creates
+            if (!File.Exists(path)) return;
+            ui.TryEnqueue(() =>
+            {
+                if (_downloadShown.TryGetValue(path, out var at) && DateTime.Now - at < TimeSpan.FromSeconds(10)) return; // created + renamed: once
+                _downloadShown[path] = DateTime.Now;
+                Changed?.Invoke(new("\uE896", -1, "", Path.GetFileName(path), ColorHelper.FromArgb(255, 90, 200, 150), 4, path, HudKind.Download, "Downloaded · click to show"));
+            });
+        }
+        catch (Exception ex) { Crash.Log("Download finished", ex); } // async void: an escaping exception would kill the app
+    }
+
+    /// <summary>A Windows Focus session (Clock, or the notification centre) starting or ending. Windows 11 24H2 and later.</summary>
+    void StartFocus()
+    {
+        try
+        {
+            if (!Windows.Foundation.Metadata.ApiInformation.IsTypePresent("Windows.UI.Shell.FocusSessionManager") || !Windows.UI.Shell.FocusSessionManager.IsSupported) return;
+            var focus = Windows.UI.Shell.FocusSessionManager.GetDefault();
+            focus.IsFocusActiveChanged += (m, _) =>
+            {
+                bool on = m.IsFocusActive;
+                Raise(new("\uE708", -1, "", on ? "Focus on" : "Focus ended", on ? ColorHelper.FromArgb(255, 170, 150, 255) : Grey, 2.5, "ms-clock:", HudKind.Focus,
+                    on ? "Notifications are silenced" : "Notifications are back"));
+            };
+            _focus = focus;
+        }
+        catch (Exception ex) { Crash.Log("Focus watch", ex); }
+    }
+    Windows.UI.Shell.FocusSessionManager? _focus; // kept so the event keeps firing
+
+    /// <summary>Airplane mode on or off, from the radio-management registry value; a change notification wakes the read.</summary>
+    void StartAirplane()
+    {
+        try
+        {
+            var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\RadioManagement\SystemRadioState");
+            if (key is null) return;
+            bool On() => key.GetValue(null) is int v && v == 1;
+            bool was = On();
+            var changed = new AutoResetEvent(false);
+            void Arm() => Native.RegNotifyChangeKeyValue(key.Handle, false, 0x4 /* LAST_SET */ | 0x10000000 /* THREAD_AGNOSTIC */, changed.SafeWaitHandle, true);
+            Arm();
+            ThreadPool.RegisterWaitForSingleObject(changed, (_, _) =>
+            {
+                Arm();
+                bool on = On();
+                if (on == was) return;
+                was = on;
+                Raise(new("\uE709", -1, "", on ? "Airplane mode on" : "Airplane mode off", on ? ColorHelper.FromArgb(255, 255, 175, 60) : Grey, 2.5,
+                    "ms-settings:network-airplanemode", HudKind.Airplane, on ? "Wi-Fi and Bluetooth are off" : "Wireless is back"));
+            }, null, -1, executeOnlyOnce: false);
+        }
+        catch (Exception ex) { Crash.Log("Airplane watch", ex); }
+    }
+
     /// <summary>"C:#Program Files#Discord#Discord.exe" → "Discord"; a package family name → the app's display name.</summary>
     string AppName(string key)
     {
@@ -398,6 +490,9 @@ static class HudView
     public static float? Drag;
 
     static int Rows(int outputs) => Math.Min(outputs, 4);
+
+    /// <summary>Volume, brightness, battery, Bluetooth and Wi-Fi open into a card; the other notices are pills only.</summary>
+    public static bool HasCard(HudKind kind) => kind is HudKind.Volume or HudKind.Brightness or HudKind.Power or HudKind.Saver or HudKind.Bluetooth or HudKind.Wifi;
 
     public static float CardH(HudEvent e, int outputs) => e.Kind switch
     {

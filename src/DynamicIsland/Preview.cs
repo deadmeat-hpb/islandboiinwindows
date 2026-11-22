@@ -95,6 +95,9 @@ static class Preview
             new("\uE714", -1, "", "Camera", SystemHud.CameraGreen, Kind: HudKind.Privacy, Detail: "Using your camera"),
             new("\uE765", -1, "", "Caps Lock on", ColorHelper.FromArgb(255, 150, 180, 255), Kind: HudKind.Keys, Detail: "TYPING IN CAPITALS"),
             new("\uE8C8", -1, "", "Copied", ColorHelper.FromArgb(255, 150, 180, 255), Kind: HudKind.Clipboard, Detail: "Meet at the station at 6, the north entrance by the bike racks"),
+            new("\uE896", -1, "", "Island-Setup-2.4.1.exe", ColorHelper.FromArgb(255, 90, 200, 150), Kind: HudKind.Download, Detail: "Downloaded · click to show"),
+            new("\uE708", -1, "", "Focus on", ColorHelper.FromArgb(255, 170, 150, 255), Kind: HudKind.Focus, Detail: "Notifications are silenced"),
+            new("\uE709", -1, "", "Airplane mode on", ColorHelper.FromArgb(255, 255, 175, 60), Kind: HudKind.Airplane, Detail: "Wi-Fi and Bluetooth are off"),
         ];
         int k = 0;
         foreach (var e in notices)
@@ -109,7 +112,7 @@ static class Preview
                 ds.FillRoundedRectangle(pill, 29 * s, 29 * s, Color.FromArgb(235, 22, 22, 24));
                 ds.FillRoundedRectangle(card, 30 * s, 30 * s, Color.FromArgb(235, 22, 22, 24));
                 HudView.Draw(ds, pill, s, e, 1);
-                if (e.Kind is not (HudKind.Privacy or HudKind.Keys or HudKind.Clipboard)) HudView.DrawExpanded(ds, card, s, e, 1, null, []); // those have no card
+                if (HudView.HasCard(e.Kind)) HudView.DrawExpanded(ds, card, s, e, 1, null, []); // those have no card
             }
             using var file = File.Create(Path.Combine(dir, $"hud-{k++}-{e.Kind}.png".ToLowerInvariant()));
             target.SaveAsync(file.AsRandomAccessStream(), CanvasBitmapFileFormat.Png).AsTask().Wait();
