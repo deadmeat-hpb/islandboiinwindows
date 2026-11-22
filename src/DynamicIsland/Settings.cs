@@ -36,6 +36,7 @@ sealed class Settings
     public bool IdleClock { get; set; } = true;
     public int NotificationSeconds { get; set; } = 5;
     public bool HideInFullscreen { get; set; }
+    public bool PopUpsInFullscreen { get; set; } = true; // notifications, notices and call / timer pills still drop over full-screen games
     public bool DropAnimation { get; set; } = true;
 
     // Appearance

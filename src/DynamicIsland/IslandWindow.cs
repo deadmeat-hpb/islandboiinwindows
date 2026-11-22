@@ -40,6 +40,8 @@ public sealed class IslandWindow : Window
     double _noteUntil, _hudUntil;
     bool _pinned; // pill shown by a click while nothing plays
     bool _fullscreen;
+    /// <summary>Something is full screen and the user wants only the bar over it (no pop-ups).</summary>
+    bool Quiet => _fullscreen && !Settings.Current.PopUpsInFullscreen;
     double _lastFullscreenCheck;
     HudEvent? _hud;
     DispatcherQueueTimer _slowTick;
@@ -144,7 +146,7 @@ public sealed class IslandWindow : Window
         var hud = _system = new SystemHud(DispatcherQueue);
         hud.Changed += e =>
         {
-            if (_fullscreen || _mode == Mode.Notify || !_visible || !Allowed(e.Kind)) return;
+            if (Quiet || _mode == Mode.Notify || !_visible || !Allowed(e.Kind)) return;
             if (_mode == Mode.Expanded) // the open card stacks under the notice (as a card if it's the media card) and comes back after it
             {
                 if (HasMedia) _stackOpen = true; else _reopen = true;
@@ -422,7 +424,8 @@ public sealed class IslandWindow : Window
             // D3D exclusive full screen and presentations always count; "busy" (a window covering the screen) only when it's an app.
             _fullscreen = Native.SHQueryUserNotificationState(out int state) == 0 && (state is 3 or 4 || state == 2 && AppFillsScreen());
         }
-        if (_fullscreen && _mode != Mode.Idle) { _pinned = false; SetMode(Mode.Idle); }
+        // Full screen: the bar, plus (unless switched off) notifications, notices and a call or timer pill; nothing opened by hovering or clicking.
+        if (_fullscreen && _mode != Mode.Idle && (Quiet || _mode is Mode.Hover or Mode.Expanded || _mode == Mode.Compact && !(CallOn || TimerOn))) { _pinned = false; SetMode(Mode.Idle); }
 
         // Hidden (Settings, tray menu, or full screen with "Hide the island"): the window goes away and only this check runs, twice a second.
         bool show = Settings.Current.ShowIsland && !(_fullscreen && Settings.Current.HideInFullscreen);
@@ -442,7 +445,7 @@ public sealed class IslandWindow : Window
 
         if ((Native.GetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE) & Native.WS_EX_TOPMOST) == 0) // the shell can drop us out of the topmost band; then clicks hit the window below
             Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
-        if (!_fullscreen) UpdateHover(now);
+        if (!Quiet) UpdateHover(now);
         // Stacking: while a notification or notice is up, the playing media drops below it as its own pill, then pushes back up.
         bool stacked = (MediaPlaying || _stackOpen) && _mode is Mode.Notify or Mode.Hud;
         _stack.Target = !stacked ? 0 : _leaving ? 6 * _s : _top.Target + _h.Target + 8 * _s; // glides up into the leaving island's place
@@ -528,7 +531,7 @@ public sealed class IslandWindow : Window
         float px = p.X - _monLeft, py = p.Y - _monTop;
         var (cx, top, w, h) = Shape();
         float m = 12 * _s;
-        bool near = px >= cx - w / 2 - m && px <= cx + w / 2 + m && py <= top + h + m && py >= -m;
+        bool near = !_fullscreen && px >= cx - w / 2 - m && px <= cx + w / 2 + m && py <= top + h + m && py >= -m; // in a game the cursor is the game's
 
         if (!near && _mode != Mode.Expanded && now > _holdUntil) _pinned = false;
         if (_mode == Mode.Expanded) { } // stays open until clicked
@@ -742,7 +745,8 @@ public sealed class IslandWindow : Window
     }
 
     void OnClick()
-    {        if (_fullscreen) return; // idle bar only while something is fullscreen
+    {
+        if (_fullscreen) return; // in a game a click belongs to the game; the pop-ups time out on their own
         var p = new System.Numerics.Vector2(_pressX, _pressY);
         bool onStack = _stack.Value > 2 * _s && _pressY > _stack.Value;
         if (onStack && !_stackOpen) // the stacked media pill opens into the media card in place; the notice above stays a pill

@@ -127,7 +127,8 @@ public sealed class SettingsWindow : Window
                 page.Children.Add(Card("", "Notification time", "How long a notification stays before it slides away. Hovering keeps it open.",
                     Choice(["3 seconds", "5 seconds", "8 seconds"], s => s.NotificationSeconds <= 3 ? 0 : s.NotificationSeconds >= 8 ? 2 : 1, (s, i) => s.NotificationSeconds = i switch { 0 => 3, 2 => 8, _ => 5 })));
                 page.Children.Add(Card("", "Full-screen apps", "Games, videos and presentations.",
-                    Choice(["Keep the slim bar", "Hide the island"], s => s.HideInFullscreen ? 1 : 0, (s, i) => s.HideInFullscreen = i == 1)));
+                    Choice(["Show pop-ups over them", "Only the slim bar", "Hide the island"], s => s.HideInFullscreen ? 2 : s.PopUpsInFullscreen ? 0 : 1,
+                        (s, i) => { s.HideInFullscreen = i == 2; s.PopUpsInFullscreen = i == 0; })));
                 page.Children.Add(Card("", "Drop animation", "Light flows from the music player or Clock into the island when you minimise it.", Toggle(s => s.DropAnimation, (s, v) => s.DropAnimation = v)));
                 page.Children.Add(Note(() => Settings.Current.Lively ? null : "Animations are set to Reduced or Off in Power and performance, so the drop doesn't play."));
                 break;

@@ -10,7 +10,7 @@ A Dynamic Island for Windows, with an Apple Liquid Glass look.
 - Drag it left or right along the top edge. It stretches with speed, bounces back, snaps to left / center / right, and remembers where you left it.
 - Clicks step through stages: bar → pill → card. Right-click goes back a stage. Moving the mouse away collapses a pill to the bar; a card you opened stays until you close it.
 - Every pill and card is floating glass with a soft inner light in its source's colour (album, app, notice). Text is set in Inter (bundled, SIL Open Font License).
-- Fullscreen games, videos and presentations: the island stays the idle bar.
+- Fullscreen games, videos and presentations: the island rests as the bar, and notifications, notices and a call or timer pill still drop over them (borderless and windowed full screen; a game in exclusive full screen draws over every window). Hover and clicks are left to the game. Settings can limit this to the bar or hide the island.
 
 ### Music
 - Pill: album art and a moving waveform. With nothing playing, the pill is a clock (time left, date right).
@@ -37,7 +37,7 @@ A Dynamic Island for Windows, with an Apple Liquid Glass look.
 Dynamic Island lives in the taskbar's hidden icons (the ^ arrow). Click the icon, or open the app again while it runs, to open Settings; right-click it for Settings, Hide island and Quit. Settings is a normal Windows 11 window with five pages, and every change saves at once (%LOCALAPPDATA%\DynamicIslandData\settings.json) and applies live:
 
 - **General**: start with Windows or only when opened, show or hide the island, quit, reset all settings.
-- **Island behaviour**: switch each island on or off (music, notifications, screenshots, volume and brightness, battery, Bluetooth, Wi-Fi, microphone and camera, Caps Lock, Copied, calls, downloads, Focus and airplane mode); clock or slim resting bar; notification time (3, 5 or 8 s); keep the slim bar or hide in full-screen apps; the drop animation from the music player or Clock; Clock timers on or off.
+- **Island behaviour**: switch each island on or off (music, notifications, screenshots, volume and brightness, battery, Bluetooth, Wi-Fi, microphone and camera, Caps Lock, Copied, calls, downloads, Focus and airplane mode); clock or slim resting bar; notification time (3, 5 or 8 s); over full-screen apps: pop-ups, only the bar, or hidden; the drop animation from the music player or Clock; Clock timers on or off.
 - **Appearance**: liquid glass or a solid dark island, size (small, default, large), 24- or 12-hour clock, date on or off, re-centre the island.
 - **Power and performance**: Quality, Balanced or Battery saver (solid island, 15 fps waveform); Animations Full, Reduced (no wobble, stretch, drip or drop; still waveform, pill redraws once a second) or Off (everything appears in place); pausing the glass on battery.
 - **About**: version, the crash log folder, the source.
