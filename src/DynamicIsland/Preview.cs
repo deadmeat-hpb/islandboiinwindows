@@ -91,6 +91,10 @@ static class Preview
             new("\uE702", 0.8f, "80%", "Galaxy Buds2 Pro", SystemHud.BluetoothBlue, Kind: HudKind.Bluetooth),
             new("\uE702", -1, "", "MX Master 3S", SystemHud.BluetoothBlue, Kind: HudKind.Bluetooth),
             new("\uE701", 0.8f, "", "HomeWiFi_5G", SystemHud.WifiBlue, Kind: HudKind.Wifi),
+            new("\uE720", -1, "", "Discord", SystemHud.MicOrange, Kind: HudKind.Privacy, Detail: "Using your microphone"),
+            new("\uE714", -1, "", "Camera", SystemHud.CameraGreen, Kind: HudKind.Privacy, Detail: "Using your camera"),
+            new("\uE765", -1, "", "Caps Lock on", ColorHelper.FromArgb(255, 150, 180, 255), Kind: HudKind.Keys, Detail: "TYPING IN CAPITALS"),
+            new("\uE8C8", -1, "", "Copied", ColorHelper.FromArgb(255, 150, 180, 255), Kind: HudKind.Clipboard, Detail: "Meet at the station at 6, the north entrance by the bike racks"),
         ];
         int k = 0;
         foreach (var e in notices)
@@ -105,7 +109,7 @@ static class Preview
                 ds.FillRoundedRectangle(pill, 29 * s, 29 * s, Color.FromArgb(235, 22, 22, 24));
                 ds.FillRoundedRectangle(card, 30 * s, 30 * s, Color.FromArgb(235, 22, 22, 24));
                 HudView.Draw(ds, pill, s, e, 1);
-                HudView.DrawExpanded(ds, card, s, e, 1, null, []);
+                if (e.Kind is not (HudKind.Privacy or HudKind.Keys or HudKind.Clipboard)) HudView.DrawExpanded(ds, card, s, e, 1, null, []); // those have no card
             }
             using var file = File.Create(Path.Combine(dir, $"hud-{k++}-{e.Kind}.png".ToLowerInvariant()));
             target.SaveAsync(file.AsRandomAccessStream(), CanvasBitmapFileFormat.Png).AsTask().Wait();

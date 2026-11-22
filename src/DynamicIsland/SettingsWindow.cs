@@ -114,6 +114,9 @@ public sealed class SettingsWindow : Window
                 page.Children.Add(Card("", "Battery and charging", "Plugging in, unplugging, low battery and energy saver.", Toggle(s => s.Battery, (s, v) => s.Battery = v)));
                 page.Children.Add(Card("", "Bluetooth", "Devices connecting, with their battery.", Toggle(s => s.Bluetooth, (s, v) => s.Bluetooth = v)));
                 page.Children.Add(Card("", "Wi-Fi", "Joining a network.", Toggle(s => s.Wifi, (s, v) => s.Wifi = v)));
+                page.Children.Add(Card("", "Microphone and camera", "A dot on the island while an app uses them, and which app when it starts.", Toggle(s => s.Privacy, (s, v) => s.Privacy = v)));
+                page.Children.Add(Card("", "Caps Lock", "Caps Lock turning on or off.", Toggle(s => s.CapsLock, (s, v) => s.CapsLock = v)));
+                page.Children.Add(Card("", "Copied", "What you copy, in one line. Private copies from password managers are never shown.", Toggle(s => s.Clipboard, (s, v) => s.Clipboard = v)));
                 page.Children.Add(Card("", "Clock timers", "Minimise Clock while a timer or the stopwatch runs and it keeps counting in the island.", Toggle(s => s.ClockTimers, (s, v) => s.ClockTimers = v)));
                 page.Children.Add(Section("Behaviour"));
                 page.Children.Add(Card("", "Resting island", "What the island shows when nothing is happening.",

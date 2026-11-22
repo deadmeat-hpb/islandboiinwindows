@@ -156,7 +156,9 @@ public sealed class IslandWindow : Window
             SetMode(Mode.Hud); // re-run: a notice is wider than a level bar
             _dirty = true;
         };
+        hud.PrivacyChanged += () => _dirty = true; // the bar's mic / camera dot
         hud.Start();
+        hud.StartClipboard(_hwnd, _messages!);
 
         _x = new Spring(LoadPosition() * _monW, 520, 34); // stiff-ish follow: lags a little behind the cursor while dragging
         _w = new Spring(0, 380, 36);                       // same near-critical damping as height: a bouncing width reads as wobble
@@ -184,6 +186,9 @@ public sealed class IslandWindow : Window
         HudKind.Power or HudKind.Saver => Settings.Current.Battery,
         HudKind.Bluetooth => Settings.Current.Bluetooth,
         HudKind.Wifi => Settings.Current.Wifi,
+        HudKind.Privacy => Settings.Current.Privacy,
+        HudKind.Keys => Settings.Current.CapsLock,
+        HudKind.Clipboard => Settings.Current.Clipboard,
         _ => true,
     };
 
@@ -397,6 +402,7 @@ public sealed class IslandWindow : Window
     {
         double now = _clock.Elapsed.TotalSeconds;
         float dt = (float)Math.Min(now - _lastTick, 1 / 30.0);
+        _system?.PollKeys();
         _lastTick = now;
 
         if (now - _lastFullscreenCheck > 1 && _flow?.IsPlaying != true) // fullscreen games, videos and presentations: never hide, just stay the idle bar (our own flow overlay doesn't count)
@@ -758,6 +764,15 @@ public sealed class IslandWindow : Window
         }
         if (_mode == Mode.Hud && _hud is { } hud)
         {
+            if (hud.Kind is HudKind.Privacy or HudKind.Keys or HudKind.Clipboard) // no card: a mic / camera pill opens its privacy page, the others just go
+            {
+                if (hud.Kind == HudKind.Privacy && hud.Settings is { } privacy)
+                    try { Process.Start(new ProcessStartInfo(privacy) { UseShellExecute = true }); }
+                    catch (Exception ex) { Debug.WriteLine($"Couldn't open {privacy}: {ex.Message}"); }
+                _hudUntil = 0;
+                _dirty = true;
+                return;
+            }
             if (!_detail) // notice pill → its card; it stays until closed
             {
                 if (hud.Kind == HudKind.Volume) _outputs = _system?.Outputs() ?? [];
@@ -913,6 +928,12 @@ public sealed class IslandWindow : Window
                 else if (hudAlpha > 0 && _h.Value < (hudEvent.Text.Length > 0 ? 66 : 40) * _s) HudView.Draw(ds, rect, _s, hudEvent, hudAlpha); // notice pills are 58 tall: a 40 cap left Bluetooth, Wi-Fi and battery pills empty
             }
             if (clockAlpha > 0) DrawClock(ds, rect, clockAlpha);
+            if (_mode is Mode.Idle or Mode.Hover && Settings.Current.Privacy && _system is { } sys && (sys.MicInUse || sys.CameraInUse)) // like the phone: a still dot while an app listens or watches
+            {
+                var dot = sys.CameraInUse ? SystemHud.CameraGreen : SystemHud.MicOrange;
+                float rad = (ShowClock ? 2.6f : 2f) * _s;
+                ds.FillCircle((float)rect.Right - rad - (ShowClock ? 7 : 5) * _s, (float)(rect.Y + rect.Height / 2), rad, dot);
+            }
             else if (handOver < 1) // the clock leaving into the pill
             {
                 float e = 1 - (1 - handOver) * (1 - handOver) * (1 - handOver);

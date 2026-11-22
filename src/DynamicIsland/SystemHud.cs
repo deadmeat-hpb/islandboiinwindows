@@ -19,9 +19,9 @@ namespace DynamicIsland;
 /// One island pop-up. With <paramref name="Text"/> it's a ColorOS-style notice: icon, text, and a level ring + value on the right.
 /// Without it, a volume/brightness-style level bar. Level &lt; 0 hides the bar/ring.
 /// </summary>
-sealed record HudEvent(string Glyph, float Level, string Value, string Text = "", Windows.UI.Color? Tint = null, double Seconds = 1.6, string? Settings = null, HudKind Kind = HudKind.Volume);
+sealed record HudEvent(string Glyph, float Level, string Value, string Text = "", Windows.UI.Color? Tint = null, double Seconds = 1.6, string? Settings = null, HudKind Kind = HudKind.Volume, string? Detail = null);
 
-enum HudKind { Volume, Brightness, Power, Bluetooth, Wifi, Saver }
+enum HudKind { Volume, Brightness, Power, Bluetooth, Wifi, Saver, Privacy, Keys, Clipboard }
 
 /// <summary>An audio output the volume card can switch to.</summary>
 sealed record AudioOutput(string Id, string Name, bool IsDefault);
@@ -116,6 +116,7 @@ sealed class SystemHud(DispatcherQueue ui)
         };
 
         StartBluetooth();
+        StartPrivacy();
         NetworkInformation.NetworkStatusChanged += _ => ui.TryEnqueue(CheckWifi);
         CheckWifi(); // remember the current network so we only announce changes
     }
@@ -195,6 +196,120 @@ sealed class SystemHud(DispatcherQueue ui)
         bool announce = _ssid is not null && !string.IsNullOrEmpty(ssid); // skip the very first check and disconnects
         _ssid = ssid ?? "";
         if (announce) Raise(new("\uE701", (profile!.GetSignalBars() ?? 0) / 5f, "", ssid!, WifiBlue, 2.5, "ms-settings:network-wifi", HudKind.Wifi));
+    }
+
+    // ---- Caps Lock, the clipboard, and apps using the microphone or camera ----
+
+    static readonly Color Grey = ColorHelper.FromArgb(255, 200, 210, 225);
+    internal static readonly Color MicOrange = ColorHelper.FromArgb(255, 255, 159, 10), CameraGreen = ColorHelper.FromArgb(255, 48, 209, 88);
+    bool? _caps;
+
+    /// <summary>Caps Lock turning on or off; called from the island's resting tick (no keyboard hook, so typing isn't slowed).</summary>
+    public void PollKeys()
+    {
+        bool on = (Native.GetKeyState(0x14 /* VK_CAPITAL */) & 1) != 0;
+        if (_caps is bool was && was != on)
+            Raise(new("", -1, "", on ? "Caps Lock on" : "Caps Lock off", on ? ColorHelper.FromArgb(255, 150, 180, 255) : Grey, 1.6, null, HudKind.Keys, on ? "TYPING IN CAPITALS" : "Typing in lowercase"));
+        _caps = on;
+    }
+
+    DispatcherQueueTimer? _clipDelay;
+
+    /// <summary>Listens for copies. Text shows as a short preview (password-like text only as a length), files by name.</summary>
+    public void StartClipboard(nint hwnd, WinUIEx.Messaging.WindowMessageMonitor messages)
+    {
+        if (!Native.AddClipboardFormatListener(hwnd)) return;
+        _clipDelay = ui.CreateTimer();
+        _clipDelay.Interval = TimeSpan.FromMilliseconds(120); // apps often write the clipboard in several steps
+        _clipDelay.IsRepeating = false;
+        _clipDelay.Tick += (_, _) => { try { if (Clip.Read(hwnd) is { } e) Changed?.Invoke(e); } catch (Exception ex) { Crash.Log("Clipboard", ex); } };
+        messages.WindowMessageReceived += (_, e) => { if (e.Message.MessageId == 0x031D /* WM_CLIPBOARDUPDATE */) { _clipDelay.Stop(); _clipDelay.Start(); } };
+    }
+
+    const string ConsentStore = @"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore";
+    readonly Dictionary<string, HashSet<string>> _using = new() { ["microphone"] = [], ["webcam"] = [] };
+    readonly Dictionary<string, string> _appNames = [];
+
+    public bool MicInUse => _using["microphone"].Count > 0;
+    public bool CameraInUse => _using["webcam"].Count > 0;
+
+    /// <summary>The microphone or camera started or stopped being used (on the UI thread).</summary>
+    public event Action? PrivacyChanged;
+
+    /// <summary>
+    /// Windows records each app's microphone and camera use in the registry (the same data as the taskbar's mic icon).
+    /// A change notification on those keys wakes a rescan, so nothing polls.
+    /// </summary>
+    void StartPrivacy()
+    {
+        foreach (var cap in _using.Keys.ToArray())
+        {
+            try
+            {
+                var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey($@"{ConsentStore}\{cap}");
+                if (key is null) continue;
+                var changed = new AutoResetEvent(false);
+                void Arm() => Native.RegNotifyChangeKeyValue(key.Handle, true, 0x4 /* LAST_SET */ | 0x1 /* NAME */ | 0x10000000 /* THREAD_AGNOSTIC */, changed.SafeWaitHandle, true);
+                Arm();
+                ScanPrivacy(cap, announce: false);
+                ThreadPool.RegisterWaitForSingleObject(changed, (_, _) => { Arm(); ui.TryEnqueue(() => ScanPrivacy(cap, announce: true)); }, null, -1, executeOnlyOnce: false);
+            }
+            catch (Exception ex) { Crash.Log("Privacy watch", ex); }
+        }
+    }
+
+    void ScanPrivacy(string cap, bool announce)
+    {
+        try
+        {
+            var now = new HashSet<string>();
+            using var root = Microsoft.Win32.Registry.CurrentUser.OpenSubKey($@"{ConsentStore}\{cap}");
+            if (root is null) return;
+            void Check(Microsoft.Win32.RegistryKey parent, string name)
+            {
+                using var app = parent.OpenSubKey(name);
+                if (app?.GetValue("LastUsedTimeStart") is long start && start > 0 && app.GetValue("LastUsedTimeStop") is long stop && stop == 0) now.Add(name);
+            }
+            foreach (var name in root.GetSubKeyNames())
+            {
+                if (name != "NonPackaged") { Check(root, name); continue; }
+                using var desktop = root.OpenSubKey(name);
+                if (desktop is not null) foreach (var exe in desktop.GetSubKeyNames()) Check(desktop, exe);
+            }
+            var was = _using[cap];
+            var started = now.Except(was).ToList();
+            bool changed = !now.SetEquals(was);
+            _using[cap] = now;
+            if (changed) PrivacyChanged?.Invoke();
+            if (!announce || started.Count == 0) return;
+            bool mic = cap == "microphone";
+            Changed?.Invoke(new(mic ? "" : "", -1, "", AppName(started[0]), mic ? MicOrange : CameraGreen, 3,
+                mic ? "ms-settings:privacy-microphone" : "ms-settings:privacy-webcam", HudKind.Privacy, mic ? "Using your microphone" : "Using your camera"));
+        }
+        catch (Exception ex) { Crash.Log("Privacy scan", ex); }
+    }
+
+    /// <summary>"C:#Program Files#Discord#Discord.exe" → "Discord"; a package family name → the app's display name.</summary>
+    string AppName(string key)
+    {
+        if (_appNames.TryGetValue(key, out var known)) return known;
+        string name;
+        try
+        {
+            if (key.Contains('#'))
+            {
+                string path = key.Replace('#', '\\');
+                string? description = File.Exists(path) ? FileVersionInfo.GetVersionInfo(path).FileDescription : null;
+                name = string.IsNullOrWhiteSpace(description) ? Path.GetFileNameWithoutExtension(path) : description.Trim();
+            }
+            else
+            {
+                var package = new Windows.Management.Deployment.PackageManager().FindPackagesForUser("", key).FirstOrDefault();
+                name = package?.DisplayName is { Length: > 0 } shown && !shown.StartsWith("ms-resource:") ? shown : key.Split('_')[0].Split('.')[^1];
+            }
+        }
+        catch { name = key.Split('_')[0].Split('#')[^1]; }
+        return _appNames[key] = name;
     }
 
     // ---- Controls used by the expanded cards ----
@@ -536,7 +651,7 @@ static class HudView
         float tx = x + 60 * s, gaugeW = e.Kind == HudKind.Wifi ? 30 * s : e.Level >= 0 ? 74 * s : 0;
         var name = Text(13.5f * s, Microsoft.UI.Text.FontWeights.SemiBold);
         var status = Text(11.5f * s, Microsoft.UI.Text.FontWeights.Normal);
-        string line = e.Kind switch { HudKind.Power => charging ? "Plugged in" : e.Text == "On battery" ? "Unplugged" : "Plug in soon", HudKind.Saver => e.Text.EndsWith("on") ? "Battery lasts longer" : "Full performance", HudKind.Bluetooth => "Connected", _ => $"{Signal(e.Level)} signal" };
+        string line = e.Detail ?? e.Kind switch { HudKind.Power => charging ? "Plugged in" : e.Text == "On battery" ? "Unplugged" : "Plug in soon", HudKind.Saver => e.Text.EndsWith("on") ? "Battery lasts longer" : "Full performance", HudKind.Bluetooth => "Connected", _ => $"{Signal(e.Level)} signal" };
         ds.DrawText(e.Text, new Rect(tx, cy - 18 * s, right - tx - gaugeW - 8 * s, 20 * s), white, name);
         ds.DrawText(line, new Rect(tx, cy + 1 * s, right - tx - gaugeW - 8 * s, 18 * s), ColorHelper.FromArgb((byte)(150 * a), 255, 255, 255), status);
         if (e.Kind == HudKind.Wifi)

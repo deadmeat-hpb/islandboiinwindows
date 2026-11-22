@@ -34,6 +34,17 @@ static class Native
     [DllImport("user32.dll")] public static extern nint MonitorFromPoint(POINT pt, uint flags);
     [DllImport("user32.dll", EntryPoint = "GetMonitorInfoW")] public static extern bool GetMonitorInfo(nint hmon, ref MONITORINFO mi);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(nint hwnd);
+    [DllImport("user32.dll")] public static extern short GetKeyState(int key);
+    [DllImport("user32.dll")] public static extern bool AddClipboardFormatListener(nint hwnd);
+    [DllImport("user32.dll")] public static extern bool OpenClipboard(nint hwnd);
+    [DllImport("user32.dll")] public static extern bool CloseClipboard();
+    [DllImport("user32.dll")] public static extern nint GetClipboardData(uint format);
+    [DllImport("user32.dll")] public static extern bool IsClipboardFormatAvailable(uint format);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern uint RegisterClipboardFormat(string name);
+    [DllImport("kernel32.dll")] public static extern nint GlobalLock(nint mem);
+    [DllImport("kernel32.dll")] public static extern bool GlobalUnlock(nint mem);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] public static extern uint DragQueryFile(nint drop, uint index, System.Text.StringBuilder? file, int max);
+    [DllImport("advapi32.dll")] public static extern int RegNotifyChangeKeyValue(Microsoft.Win32.SafeHandles.SafeRegistryHandle key, bool subtree, uint filter, Microsoft.Win32.SafeHandles.SafeWaitHandle evt, bool async);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern int RegisterApplicationRestart(string? args, uint flags); // relaunch after a crash or hang
     public const nint WS_EX_LAYERED = 0x80000, WS_EX_TRANSPARENT = 0x20;
     public const uint LWA_ALPHA = 0x2;
