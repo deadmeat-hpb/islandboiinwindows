@@ -11,6 +11,7 @@ using Windows.Foundation;
 using Windows.Networking.Connectivity;
 using Microsoft.Graphics.Canvas.Geometry;
 using Windows.System.Power;
+using Color = Windows.UI.Color;
 
 namespace DynamicIsland;
 
@@ -18,13 +19,19 @@ namespace DynamicIsland;
 /// One island pop-up. With <paramref name="Text"/> it's a ColorOS-style notice: icon, text, and a level ring + value on the right.
 /// Without it, a volume/brightness-style level bar. Level &lt; 0 hides the bar/ring.
 /// </summary>
-sealed record HudEvent(string Glyph, float Level, string Value, string Text = "", Windows.UI.Color? Tint = null, double Seconds = 1.6, string? Settings = null);
+sealed record HudEvent(string Glyph, float Level, string Value, string Text = "", Windows.UI.Color? Tint = null, double Seconds = 1.6, string? Settings = null, HudKind Kind = HudKind.Volume, string? Detail = null);
+
+enum HudKind { Volume, Brightness, Power, Bluetooth, Wifi, Saver, Privacy, Keys, Clipboard, Download, Focus, Airplane }
+
+/// <summary>An audio output the volume card can switch to.</summary>
+sealed record AudioOutput(string Id, string Name, bool IsDefault);
 
 /// <summary>Volume, brightness, power, Bluetooth and Wi-Fi events, re-posted to the UI thread.</summary>
 sealed class SystemHud(DispatcherQueue ui)
 {
     const string BatteryKey = "{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2"; // Bluetooth device battery %, where the device reports it
     static readonly Windows.UI.Color Green = ColorHelper.FromArgb(255, 80, 220, 120), Red = ColorHelper.FromArgb(255, 255, 90, 80);
+    internal static readonly Windows.UI.Color BluetoothBlue = ColorHelper.FromArgb(255, 70, 140, 255), WifiBlue = ColorHelper.FromArgb(255, 90, 170, 255);
 
     MMDevice? _speakers; // kept alive so the volume callback keeps firing
     MMDeviceEnumerator? _devices;
@@ -32,6 +39,13 @@ sealed class SystemHud(DispatcherQueue ui)
     DeviceWatcher? _bluetooth;
     readonly Dictionary<string, bool> _btConnected = [];
     int _lowAnnounced = 101;
+    PowerSupplyStatus _supply;
+    EnergySaverStatus _saver;
+    DateTime _powerChangedAt;
+    internal static readonly Windows.UI.Color SaverGreen = ColorHelper.FromArgb(255, 130, 215, 90);
+
+    /// <summary>The battery glyph for a charge level (Segoe Fluent Battery0..Battery10).</summary>
+    static string BatteryGlyph(int pct) => ((char)(0xEBA0 + Math.Clamp((pct + 5) / 10, 0, 10))).ToString();
     string? _ssid;
 
     public event Action<HudEvent>? Changed;
@@ -50,18 +64,44 @@ sealed class SystemHud(DispatcherQueue ui)
         {
             _brightness = new ManagementEventWatcher(new ManagementScope(@"root\WMI"), new EventQuery("SELECT * FROM WmiMonitorBrightnessEvent"));
             _brightness.EventArrived += (_, e) =>
-                Raise(new("\uE706", Convert.ToSingle(e.NewEvent.Properties["Brightness"].Value) / 100f, ""));
+            {
+                if ((DateTime.Now - _powerChangedAt).TotalSeconds < 4) return; // Windows changes brightness on AC/battery switches: that's not the user
+                Raise(new("\uE706", Convert.ToSingle(e.NewEvent.Properties["Brightness"].Value) / 100f, "", Kind: HudKind.Brightness, Settings: "ms-settings:display"));
+            };
             _brightness.Start();
         }
         catch (Exception ex) { Debug.WriteLine($"Brightness unavailable: {ex}"); }
 
+        // Plugged in / unplugged: compare with the last state (a slow charger reports Inadequate, which used to be ignored).
+        _supply = PowerManager.PowerSupplyStatus;
         PowerManager.PowerSupplyStatusChanged += (_, _) =>
         {
-            if (PowerManager.PowerSupplyStatus != PowerSupplyStatus.Adequate) return; // only announce plugging in
+            var now = PowerManager.PowerSupplyStatus;
+            bool plugged = now != PowerSupplyStatus.NotPresent, was = _supply != PowerSupplyStatus.NotPresent;
+            _supply = now;
+            if (plugged == was || PowerManager.BatteryStatus == BatteryStatus.NotPresent) return; // desktops: no battery, nothing to say
+            _powerChangedAt = DateTime.Now;
             int pct = PowerManager.RemainingChargePercent;
-            _lowAnnounced = 101;
-            Raise(new("\uE945", pct / 100f, $"{pct}%", "Charging", Green, 2.5, "ms-settings:batterysaver"));
+            if (plugged)
+            {
+                _lowAnnounced = 101;
+                Raise(new("\uE945", pct / 100f, $"{pct}%", "Charging", Green, 2.5, "ms-settings:batterysaver", HudKind.Power));
+            }
+            else Raise(new(BatteryGlyph(pct), pct / 100f, $"{pct}%", "On battery", ColorHelper.FromArgb(255, 200, 210, 225), 2.5, "ms-settings:batterysaver", HudKind.Power));
         };
+
+        // Energy saver (battery saver) switching on or off, by the user or at the threshold.
+        _saver = PowerManager.EnergySaverStatus;
+        PowerManager.EnergySaverStatusChanged += (_, _) =>
+        {
+            var now = PowerManager.EnergySaverStatus;
+            bool on = now == EnergySaverStatus.On, wasOn = _saver == EnergySaverStatus.On;
+            _saver = now;
+            if (on == wasOn) return;
+            int pct = PowerManager.RemainingChargePercent;
+            Raise(new(on ? "\uEBC0" : BatteryGlyph(pct), pct / 100f, $"{pct}%", on ? "Energy saver on" : "Energy saver off", on ? SaverGreen : ColorHelper.FromArgb(255, 200, 210, 225), 3, "ms-settings:batterysaver", HudKind.Saver));
+        };
+
         PowerManager.RemainingChargePercentChanged += (_, _) =>
         {
             int pct = PowerManager.RemainingChargePercent;
@@ -70,12 +110,16 @@ sealed class SystemHud(DispatcherQueue ui)
                 if (pct <= level && _lowAnnounced > level)
                 {
                     _lowAnnounced = level;
-                    Raise(new("\uEBA0", pct / 100f, $"{pct}%", "Battery low", Red, 7, "ms-settings:batterysaver"));
+                    Raise(new("\uEBA0", pct / 100f, $"{pct}%", "Battery low", Red, 7, "ms-settings:batterysaver", HudKind.Power));
                     break;
                 }
         };
 
         StartBluetooth();
+        StartPrivacy();
+        StartDownloads();
+        StartFocus();
+        StartAirplane();
         NetworkInformation.NetworkStatusChanged += _ => ui.TryEnqueue(CheckWifi);
         CheckWifi(); // remember the current network so we only announce changes
     }
@@ -87,7 +131,7 @@ sealed class SystemHud(DispatcherQueue ui)
             _speakers?.Dispose();
             _speakers = (_devices ??= new MMDeviceEnumerator()).GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
             _speakers.AudioEndpointVolume.OnVolumeNotification += d =>
-                Raise(new(d.Muted ? "\uE74F" : "\uE767", d.Muted ? 0 : d.MasterVolume, ""));
+                Raise(new(d.Muted ? "\uE74F" : "\uE767", d.Muted ? 0 : d.MasterVolume, "", Settings: "ms-settings:sound"));
         }
         catch (Exception ex) { Debug.WriteLine($"Volume unavailable: {ex}"); }
     }
@@ -107,19 +151,29 @@ sealed class SystemHud(DispatcherQueue ui)
     }
 
     readonly Dictionary<string, (string Name, Guid Container)> _btInfo = [];
+    readonly Dictionary<Guid, DateTime> _btAnnounced = [];
 
     async void OnBluetooth(string id, string? name, IReadOnlyDictionary<string, object> props)
     {
-        if (name is not null) _btInfo[id] = (name, props.TryGetValue("System.Devices.Aep.ContainerId", out var c) && c is Guid g ? g : Guid.Empty);
+        try { await OnBluetoothCore(id, name, props); }
+        catch (Exception ex) { Crash.Log("OnBluetooth", ex); } // async void: an escaping exception would kill the app
+    }
+
+        async Task OnBluetoothCore(string id, string? name, IReadOnlyDictionary<string, object> props)
+    {
+        if (name is not null) _btInfo[id] = (string.IsNullOrWhiteSpace(name) ? "Bluetooth device" : name, props.TryGetValue("System.Devices.Aep.ContainerId", out var c) && c is Guid g ? g : Guid.Empty);
         if (!props.TryGetValue("System.Devices.Aep.IsConnected", out var v) || v is not bool connected) return;
         bool was = _btConnected.GetValueOrDefault(id);
         _btConnected[id] = connected;
         // Added only records the starting state; a later false→true update is a real connect. (Waiting for EnumerationCompleted
         // instead ignored connects for ~30 s after launch: that is how long the Bluetooth endpoint scan takes.)
         if (name is not null || !connected || was || !_btInfo.TryGetValue(id, out var info)) return;
+        // A headset has a classic and an LE endpoint in one container; both report connecting. Announce it once.
+        if (info.Container != Guid.Empty && _btAnnounced.TryGetValue(info.Container, out var at) && DateTime.Now - at < TimeSpan.FromSeconds(10)) return;
+        _btAnnounced[info.Container] = DateTime.Now;
 
         int? battery = await BatteryOf(info.Container);
-        Raise(new("\uE702", battery is int b ? b / 100f : -1, battery is int p ? $"{p}%" : "", info.Name, Seconds: 5, Settings: "ms-settings:bluetooth"));
+        Raise(new("\uE702", battery is int b ? b / 100f : -1, battery is int p ? $"{p}%" : "", info.Name, BluetoothBlue, 5, "ms-settings:bluetooth", HudKind.Bluetooth));
     }
 
     /// <summary>Battery % from the device node that shares the endpoint's container, if the device reports one.</summary>
@@ -144,12 +198,528 @@ sealed class SystemHud(DispatcherQueue ui)
         if (ssid == _ssid) return;
         bool announce = _ssid is not null && !string.IsNullOrEmpty(ssid); // skip the very first check and disconnects
         _ssid = ssid ?? "";
-        if (announce) Raise(new("\uE701", (profile!.GetSignalBars() ?? 0) / 5f, "", ssid!, Seconds: 2.5, Settings: "ms-settings:network-wifi"));
+        if (announce) Raise(new("\uE701", (profile!.GetSignalBars() ?? 0) / 5f, "", ssid!, WifiBlue, 2.5, "ms-settings:network-wifi", HudKind.Wifi));
+    }
+
+    // ---- Caps Lock, the clipboard, and apps using the microphone or camera ----
+
+    static readonly Color Grey = ColorHelper.FromArgb(255, 200, 210, 225);
+    internal static readonly Color MicOrange = ColorHelper.FromArgb(255, 255, 159, 10), CameraGreen = ColorHelper.FromArgb(255, 48, 209, 88);
+    bool? _caps;
+
+    /// <summary>Caps Lock turning on or off; called from the island's resting tick (no keyboard hook, so typing isn't slowed).</summary>
+    public void PollKeys()
+    {
+        bool on = (Native.GetKeyState(0x14 /* VK_CAPITAL */) & 1) != 0;
+        if (_caps is bool was && was != on)
+            Raise(new("", -1, "", on ? "Caps Lock on" : "Caps Lock off", on ? ColorHelper.FromArgb(255, 150, 180, 255) : Grey, 1.6, null, HudKind.Keys, on ? "TYPING IN CAPITALS" : "Typing in lowercase"));
+        _caps = on;
+    }
+
+    DispatcherQueueTimer? _clipDelay;
+
+    /// <summary>Listens for copies. Text shows as a short preview (password-like text only as a length), files by name.</summary>
+    public void StartClipboard(nint hwnd, WinUIEx.Messaging.WindowMessageMonitor messages)
+    {
+        if (!Native.AddClipboardFormatListener(hwnd)) return;
+        _clipDelay = ui.CreateTimer();
+        _clipDelay.Interval = TimeSpan.FromMilliseconds(120); // apps often write the clipboard in several steps
+        _clipDelay.IsRepeating = false;
+        _clipDelay.Tick += (_, _) => { try { if (Clip.Read(hwnd) is { } e) Changed?.Invoke(e); } catch (Exception ex) { Crash.Log("Clipboard", ex); } };
+        messages.WindowMessageReceived += (_, e) => { if (e.Message.MessageId == 0x031D /* WM_CLIPBOARDUPDATE */) { _clipDelay.Stop(); _clipDelay.Start(); } };
+    }
+
+    const string ConsentStore = @"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore";
+    readonly Dictionary<string, HashSet<string>> _using = new() { ["microphone"] = [], ["webcam"] = [] };
+    readonly Dictionary<string, string> _appNames = [];
+
+    public bool MicInUse => _using["microphone"].Count > 0;
+
+    /// <summary>The Zoom / Teams / Meet / Discord call holding the microphone, or null.</summary>
+    public CallActivity? Call { get; private set; }
+
+    /// <summary>A call started or ended (on the UI thread).</summary>
+    public event Action? CallChanged;
+    public bool CameraInUse => _using["webcam"].Count > 0;
+
+    /// <summary>The microphone or camera started or stopped being used (on the UI thread).</summary>
+    public event Action? PrivacyChanged;
+
+    /// <summary>
+    /// Windows records each app's microphone and camera use in the registry (the same data as the taskbar's mic icon).
+    /// A change notification on those keys wakes a rescan, so nothing polls.
+    /// </summary>
+    void StartPrivacy()
+    {
+        foreach (var cap in _using.Keys.ToArray())
+        {
+            try
+            {
+                var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey($@"{ConsentStore}\{cap}");
+                if (key is null) continue;
+                var changed = new AutoResetEvent(false);
+                void Arm() => Native.RegNotifyChangeKeyValue(key.Handle, true, 0x4 /* LAST_SET */ | 0x1 /* NAME */ | 0x10000000 /* THREAD_AGNOSTIC */, changed.SafeWaitHandle, true);
+                Arm();
+                ScanPrivacy(cap, announce: false);
+                ThreadPool.RegisterWaitForSingleObject(changed, (_, _) => { Arm(); ui.TryEnqueue(() => ScanPrivacy(cap, announce: true)); }, null, -1, executeOnlyOnce: false);
+            }
+            catch (Exception ex) { Crash.Log("Privacy watch", ex); }
+        }
+    }
+
+    void ScanPrivacy(string cap, bool announce)
+    {
+        try
+        {
+            var now = new HashSet<string>();
+            var starts = new Dictionary<string, long>();
+            using var root = Microsoft.Win32.Registry.CurrentUser.OpenSubKey($@"{ConsentStore}\{cap}");
+            if (root is null) return;
+            void Check(Microsoft.Win32.RegistryKey parent, string name)
+            {
+                using var app = parent.OpenSubKey(name);
+                if (app?.GetValue("LastUsedTimeStart") is long start && start > 0 && app.GetValue("LastUsedTimeStop") is long stop && stop == 0) { now.Add(name); starts[name] = start; }
+            }
+            foreach (var name in root.GetSubKeyNames())
+            {
+                if (name != "NonPackaged") { Check(root, name); continue; }
+                using var desktop = root.OpenSubKey(name);
+                if (desktop is not null) foreach (var exe in desktop.GetSubKeyNames()) Check(desktop, exe);
+            }
+            var was = _using[cap];
+            var started = now.Except(was).ToList();
+            bool changed = !now.SetEquals(was);
+            _using[cap] = now;
+            if (changed) PrivacyChanged?.Invoke();
+            bool mic = cap == "microphone";
+            if (mic)
+            {
+                var call = CallActivity.Find(starts);
+                if (call?.Key != Call?.Key) { Call = call; CallChanged?.Invoke(); }
+                if (call is not null) started.Remove(call.Key); // the call pill says it already
+            }
+            if (!announce || started.Count == 0) return;
+            Changed?.Invoke(new(mic ? "" : "", -1, "", AppName(started[0]), mic ? MicOrange : CameraGreen, 3,
+                mic ? "ms-settings:privacy-microphone" : "ms-settings:privacy-webcam", HudKind.Privacy, mic ? "Using your microphone" : "Using your camera"));
+        }
+        catch (Exception ex) { Crash.Log("Privacy scan", ex); }
+    }
+
+    // ---- Downloads finishing, Windows Focus sessions, airplane mode ----
+
+    FileSystemWatcher? _downloads;
+    readonly Dictionary<string, DateTime> _downloadShown = [];
+    static readonly string[] Partial = [".crdownload", ".part", ".partial", ".download", ".tmp", ".opdownload"];
+
+    /// <summary>
+    /// A file finishing in Downloads. Browsers write "name.crdownload" / ".part" and rename it when done, so a rename out of a
+    /// partial name is the finish; a file created under its final name (a save, a copy) counts too. Event-driven, nothing polls.
+    /// </summary>
+    void StartDownloads()
+    {
+        try
+        {
+            var id = new Guid("374de290-123f-4565-9164-39c4925e467b"); // FOLDERID_Downloads (follows a moved Downloads folder)
+            if (Native.SHGetKnownFolderPath(ref id, 0, 0, out nint ptr) != 0) return;
+            string dir = System.Runtime.InteropServices.Marshal.PtrToStringUni(ptr) ?? "";
+            System.Runtime.InteropServices.Marshal.FreeCoTaskMem(ptr);
+            if (!Directory.Exists(dir)) return;
+            _downloads = new FileSystemWatcher(dir) { NotifyFilter = NotifyFilters.FileName, EnableRaisingEvents = true };
+            _downloads.Renamed += (_, e) => { if (IsPartial(e.OldName) && !IsPartial(e.Name)) Finished(e.FullPath); };
+            _downloads.Created += (_, e) => { if (!IsPartial(e.Name)) Finished(e.FullPath); };
+        }
+        catch (Exception ex) { Crash.Log("Downloads watch", ex); }
+    }
+
+    static bool IsPartial(string? name) => name is null || name.StartsWith('.') || name.StartsWith('~') || Partial.Any(x => name.EndsWith(x, StringComparison.OrdinalIgnoreCase))
+        || name.StartsWith("Unconfirmed ", StringComparison.OrdinalIgnoreCase); // Chrome's name while it asks
+
+    async void Finished(string path)
+    {
+        try
+        {
+            await Task.Delay(800); // Created fires before the copy is written; Chrome also deletes and re-creates
+            if (!File.Exists(path)) return;
+            ui.TryEnqueue(() =>
+            {
+                if (_downloadShown.TryGetValue(path, out var at) && DateTime.Now - at < TimeSpan.FromSeconds(10)) return; // created + renamed: once
+                _downloadShown[path] = DateTime.Now;
+                Changed?.Invoke(new("\uE896", -1, "", Path.GetFileName(path), ColorHelper.FromArgb(255, 90, 200, 150), 4, path, HudKind.Download, "Downloaded · click to show"));
+            });
+        }
+        catch (Exception ex) { Crash.Log("Download finished", ex); } // async void: an escaping exception would kill the app
+    }
+
+    /// <summary>A Windows Focus session (Clock, or the notification centre) starting or ending. Windows 11 24H2 and later.</summary>
+    void StartFocus()
+    {
+        try
+        {
+            if (!Windows.Foundation.Metadata.ApiInformation.IsTypePresent("Windows.UI.Shell.FocusSessionManager") || !Windows.UI.Shell.FocusSessionManager.IsSupported) return;
+            var focus = Windows.UI.Shell.FocusSessionManager.GetDefault();
+            focus.IsFocusActiveChanged += (m, _) =>
+            {
+                bool on = m.IsFocusActive;
+                Raise(new("\uE708", -1, "", on ? "Focus on" : "Focus ended", on ? ColorHelper.FromArgb(255, 170, 150, 255) : Grey, 2.5, "ms-clock:", HudKind.Focus,
+                    on ? "Notifications are silenced" : "Notifications are back"));
+            };
+            _focus = focus;
+        }
+        catch (Exception ex) { Crash.Log("Focus watch", ex); }
+    }
+    Windows.UI.Shell.FocusSessionManager? _focus; // kept so the event keeps firing
+
+    /// <summary>Airplane mode on or off, from the radio-management registry value; a change notification wakes the read.</summary>
+    void StartAirplane()
+    {
+        try
+        {
+            var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\RadioManagement\SystemRadioState");
+            if (key is null) return;
+            bool On() => key.GetValue(null) is int v && v == 1;
+            bool was = On();
+            var changed = new AutoResetEvent(false);
+            void Arm() => Native.RegNotifyChangeKeyValue(key.Handle, false, 0x4 /* LAST_SET */ | 0x10000000 /* THREAD_AGNOSTIC */, changed.SafeWaitHandle, true);
+            Arm();
+            ThreadPool.RegisterWaitForSingleObject(changed, (_, _) =>
+            {
+                Arm();
+                bool on = On();
+                if (on == was) return;
+                was = on;
+                Raise(new("\uE709", -1, "", on ? "Airplane mode on" : "Airplane mode off", on ? ColorHelper.FromArgb(255, 255, 175, 60) : Grey, 2.5,
+                    "ms-settings:network-airplanemode", HudKind.Airplane, on ? "Wi-Fi and Bluetooth are off" : "Wireless is back"));
+            }, null, -1, executeOnlyOnce: false);
+        }
+        catch (Exception ex) { Crash.Log("Airplane watch", ex); }
+    }
+
+    /// <summary>"C:#Program Files#Discord#Discord.exe" → "Discord"; a package family name → the app's display name.</summary>
+    string AppName(string key)
+    {
+        if (_appNames.TryGetValue(key, out var known)) return known;
+        string name;
+        try
+        {
+            if (key.Contains('#'))
+            {
+                string path = key.Replace('#', '\\');
+                string? description = File.Exists(path) ? FileVersionInfo.GetVersionInfo(path).FileDescription : null;
+                name = string.IsNullOrWhiteSpace(description) ? Path.GetFileNameWithoutExtension(path) : description.Trim();
+            }
+            else
+            {
+                var package = new Windows.Management.Deployment.PackageManager().FindPackagesForUser("", key).FirstOrDefault();
+                name = package?.DisplayName is { Length: > 0 } shown && !shown.StartsWith("ms-resource:") ? shown : key.Split('_')[0].Split('.')[^1];
+            }
+        }
+        catch { name = key.Split('_')[0].Split('#')[^1]; }
+        return _appNames[key] = name;
+    }
+
+    // ---- Controls used by the expanded cards ----
+
+    public bool Muted => _speakers?.AudioEndpointVolume.Mute == true;
+    public string OutputName { get { try { return _speakers?.FriendlyName ?? ""; } catch { return ""; } } }
+
+    public void SetVolume(float v)
+    {
+        try
+        {
+            if (_speakers is null) return;
+            _speakers.AudioEndpointVolume.MasterVolumeLevelScalar = Math.Clamp(v, 0, 1);
+            if (v > 0 && _speakers.AudioEndpointVolume.Mute) _speakers.AudioEndpointVolume.Mute = false;
+        }
+        catch (Exception ex) { Debug.WriteLine($"Set volume failed: {ex.Message}"); }
+    }
+
+    public void ToggleMute()
+    {
+        try { if (_speakers is not null) _speakers.AudioEndpointVolume.Mute = !_speakers.AudioEndpointVolume.Mute; }
+        catch (Exception ex) { Debug.WriteLine($"Mute failed: {ex.Message}"); }
+    }
+
+    /// <summary>Active playback devices, the default one marked.</summary>
+    public List<AudioOutput> Outputs()
+    {
+        var list = new List<AudioOutput>();
+        try
+        {
+            _devices ??= new MMDeviceEnumerator();
+            string def = _devices.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia).ID;
+            foreach (var d in _devices.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
+                using (d) list.Add(new(d.ID, d.FriendlyName, d.ID == def));
+        }
+        catch (Exception ex) { Debug.WriteLine($"Listing outputs failed: {ex.Message}"); }
+        return list;
+    }
+
+    /// <summary>Makes <paramref name="id"/> the default output for all roles (what the Windows sound flyout does).</summary>
+    public static void SetDefaultOutput(string id)
+    {
+        try
+        {
+            var policy = (IPolicyConfig)new PolicyConfigClient();
+            for (int role = 0; role < 3; role++) policy.SetDefaultEndpoint(id, role); // console, multimedia, communications
+        }
+        catch (Exception ex) { Debug.WriteLine($"Switching output failed: {ex.Message}"); }
+    }
+
+    /// <summary>Laptop panel brightness through WMI (external monitors don't support it).</summary>
+    public static void SetBrightness(float level)
+    {
+        try
+        {
+            using var searcher = new ManagementObjectSearcher(new ManagementScope(@"root\WMI"), new SelectQuery("WmiMonitorBrightnessMethods"));
+            foreach (ManagementObject o in searcher.Get())
+                using (o) o.InvokeMethod("WmiSetBrightness", [1u, (byte)Math.Clamp(level * 100, 0, 100)]);
+        }
+        catch (Exception ex) { Debug.WriteLine($"Set brightness failed: {ex.Message}"); }
+    }
+
+    // Undocumented but long-stable interface the Windows sound UI uses to change the default device.
+    [System.Runtime.InteropServices.ComImport, System.Runtime.InteropServices.Guid("870af99c-171d-4f9e-af0d-e63df40c2bc9")]
+    class PolicyConfigClient { }
+
+    [System.Runtime.InteropServices.ComImport, System.Runtime.InteropServices.Guid("f8679f50-850a-41cf-9c72-430f290290c8"),
+     System.Runtime.InteropServices.InterfaceType(System.Runtime.InteropServices.ComInterfaceType.InterfaceIsIUnknown)]
+    interface IPolicyConfig
+    {
+        int GetMixFormat(); int GetDeviceFormat(); int ResetDeviceFormat(); int SetDeviceFormat();
+        int GetProcessingPeriod(); int SetProcessingPeriod(); int GetShareMode(); int SetShareMode();
+        int GetPropertyValue(); int SetPropertyValue();
+        [System.Runtime.InteropServices.PreserveSig] int SetDefaultEndpoint([System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPWStr)] string id, int role);
+        int SetEndpointVisibility();
     }
 }
 
 static class HudView
 {
+    // ---- Expanded cards: volume, brightness, power, Bluetooth, Wi-Fi ----
+
+    public const float CardW = 340;
+
+    /// <summary>Level being dragged on the volume/brightness slider (0..1), or null.</summary>
+    public static float? Drag;
+
+    static int Rows(int outputs) => Math.Min(outputs, 4);
+
+    /// <summary>Volume, brightness, battery, Bluetooth and Wi-Fi open into a card; the other notices are pills only.</summary>
+    public static bool HasCard(HudKind kind) => kind is HudKind.Volume or HudKind.Brightness or HudKind.Power or HudKind.Saver or HudKind.Bluetooth or HudKind.Wifi;
+
+    public static float CardH(HudEvent e, int outputs) => e.Kind switch
+    {
+        HudKind.Volume => 96 + 28 * Rows(outputs) + (outputs > 0 ? 8 : 0),
+        HudKind.Brightness => 96,
+        _ => 150, // power, Bluetooth, Wi-Fi: badge header, a large value with its gauge, the settings button
+    };
+
+    static Rect Slider(Rect r, float s) => new(r.X + 20 * s, r.Y + 66 * s, r.Width - 92 * s, 8 * s);
+    static Rect Icon(Rect r, float s) => new(r.X + 14 * s, r.Y + 14 * s, 36 * s, 36 * s);
+    static Rect Row(Rect r, float s, int i) => new(r.X + 14 * s, r.Y + 92 * s + i * 28 * s, r.Width - 28 * s, 26 * s);
+    static Rect Button(Rect r, float s) => new(r.Right - 148 * s, r.Bottom - 42 * s, 134 * s, 28 * s);
+
+    /// <summary>What a click at <paramref name="p"/> on the expanded card hits: "mute", "slider", "out:N", "settings" or null.</summary>
+    public static string? Hit(Rect r, float s, HudEvent e, int outputs, System.Numerics.Vector2 p)
+    {
+        bool In(Rect b, float slack = 0) => p.X >= b.X - slack && p.X <= b.Right + slack && p.Y >= b.Y - slack && p.Y <= b.Bottom + slack;
+        switch (e.Kind)
+        {
+            case HudKind.Volume:
+                if (In(Icon(r, s))) return "mute";
+                if (In(Slider(r, s), 10 * s)) return "slider";
+                for (int i = 0; i < Rows(outputs); i++) if (In(Row(r, s, i))) return $"out:{i}";
+                return null;
+            case HudKind.Brightness:
+                return In(Slider(r, s), 10 * s) ? "slider" : null;
+            default:
+                return e.Settings is not null && In(Button(r, s)) ? "settings" : null;
+        }
+    }
+
+    public static float SliderValue(Rect r, float s, float x) { var b = Slider(r, s); return (float)Math.Clamp((x - b.X) / b.Width, 0, 1); }
+
+    public static void DrawExpanded(CanvasDrawingSession ds, Rect r, float s, HudEvent e, float a, SystemHud? hud, IReadOnlyList<AudioOutput> outputs)
+    {
+        Color W(float al) => ColorHelper.FromArgb((byte)Math.Clamp(al * 255 * a, 0, 255), 255, 255, 255);
+        var tintC = e.Tint ?? ColorHelper.FromArgb(255, 150, 180, 255);
+        Color T(float al) => ColorHelper.FromArgb((byte)Math.Clamp(al * 255 * a, 0, 255), tintC.R, tintC.G, tintC.B);
+        using var glyph = new CanvasTextFormat { FontFamily = "Segoe Fluent Icons", FontSize = 18 * s, HorizontalAlignment = CanvasHorizontalAlignment.Center, VerticalAlignment = CanvasVerticalAlignment.Center };
+        var title = Fonts.Shared(new CanvasTextFormat { FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.SemiBold), FontSize = 15 * s, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character });
+        var sub = Fonts.Shared(new CanvasTextFormat { FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.Normal), FontSize = 12 * s, WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character });
+        var value = Fonts.Shared(new CanvasTextFormat { FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.SemiBold), FontSize = 13 * s, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = CanvasHorizontalAlignment.Right, VerticalAlignment = CanvasVerticalAlignment.Center });
+
+        if (e.Kind is HudKind.Power or HudKind.Saver or HudKind.Bluetooth or HudKind.Wifi) { DrawNoticeCard(ds, r, s, e, a); return; }
+        var icon = Icon(r, s);
+        bool muted = e.Kind == HudKind.Volume && hud?.Muted == true;
+        ds.FillCircle((float)(icon.X + icon.Width / 2), (float)(icon.Y + icon.Height / 2), 18 * s, muted ? W(0.10f) : T(0.22f));
+        ds.DrawText(muted ? "" : e.Glyph, icon, muted ? W(0.6f) : W(0.95f), glyph);
+        float tx = (float)r.X + 60 * s, tw = (float)r.Width - 74 * s;
+
+        switch (e.Kind)
+        {
+            case HudKind.Volume:
+            case HudKind.Brightness:
+            {
+                float level = Drag ?? Math.Clamp(e.Level, 0, 1);
+                ds.DrawText(e.Kind == HudKind.Volume ? "Volume" : "Brightness", new Rect(tx, r.Y + 14 * s, tw, 20 * s), W(1), title);
+                string detail = e.Kind == HudKind.Volume ? (muted ? "Muted · " : "") + (hud?.OutputName ?? "") : "Built-in display";
+                ds.DrawText(detail, new Rect(tx, r.Y + 34 * s, tw, 18 * s), W(0.55f), sub);
+                var b = Slider(r, s);
+                ds.FillRoundedRectangle(b, 4 * s, 4 * s, W(0.18f));
+                ds.FillRoundedRectangle(new Rect(b.X, b.Y, b.Width * level, b.Height), 4 * s, 4 * s, T(0.95f));
+                ds.FillCircle((float)(b.X + b.Width * level), (float)(b.Y + b.Height / 2), (Drag is null ? 7 : 8) * s, W(1));
+                ds.DrawText($"{(int)MathF.Round(level * 100)}%", new Rect(b.Right + 8 * s, b.Y - 10 * s, 44 * s, 28 * s), W(0.9f), value);
+                if (e.Kind == HudKind.Volume)
+                    for (int i = 0; i < Rows(outputs.Count); i++)
+                    {
+                        var row = Row(r, s, i); var o = outputs[i];
+                        if (o.IsDefault) ds.FillRoundedRectangle(row, 8 * s, 8 * s, T(0.16f));
+                        ds.DrawText(o.IsDefault ? "" : "", new Rect(row.X + 4 * s, row.Y, 24 * s, row.Height), W(o.IsDefault ? 0.95f : 0.5f), glyph);
+                        var name = Fonts.Shared(new CanvasTextFormat { FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.Medium), FontSize = 12.5f * s, FontWeight = Microsoft.UI.Text.FontWeights.Medium, VerticalAlignment = CanvasVerticalAlignment.Center, WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character });
+                        ds.DrawText(o.Name, new Rect(row.X + 34 * s, row.Y, row.Width - 40 * s, row.Height), W(o.IsDefault ? 1 : 0.7f), name);
+                    }
+                return;
+            }
+            case HudKind.Power:
+            case HudKind.Bluetooth:
+            case HudKind.Wifi:
+                DrawNoticeCard(ds, r, s, e, a);
+                return;
+        }
+    }
+
+    /// <summary>
+    /// Battery, Bluetooth and Wi-Fi cards, in the same style as the built-in app notifications: a tinted glyph badge with a
+    /// title and status, then the value large beside its gauge (battery capsule, or signal bars), and the settings button.
+    /// </summary>
+    static void DrawNoticeCard(CanvasDrawingSession ds, Rect r, float s, HudEvent e, float a)
+    {
+        Color W(float al) => ColorHelper.FromArgb((byte)Math.Clamp(al * 255 * a, 0, 255), 255, 255, 255);
+        var c = e.Tint ?? ColorHelper.FromArgb(255, 150, 180, 255);
+        float x = (float)r.X, y = (float)r.Y, pad = 18 * s, bs = 44 * s;
+        bool charging = e.Kind == HudKind.Power && (PowerManager.BatteryStatus == BatteryStatus.Charging || PowerManager.PowerSupplyStatus == PowerSupplyStatus.Adequate);
+        Badge(ds, new Rect(x + pad, y + 16 * s, bs, bs), s, e.Glyph, c, a, pulse: charging);
+
+        string title = e.Kind switch
+        {
+            HudKind.Power => charging ? "Charging" : e.Text.Length > 0 ? e.Text : "On battery",
+            HudKind.Saver => PowerManager.EnergySaverStatus == EnergySaverStatus.On ? "Energy saver on" : "Energy saver off",
+            _ => e.Text,
+        };
+        string status = e.Kind switch
+        {
+            HudKind.Power => PowerEstimate(charging),
+            HudKind.Saver => PowerManager.EnergySaverStatus == EnergySaverStatus.On ? "Lower brightness, less background activity" : PowerEstimate(charging),
+            HudKind.Bluetooth => "Connected",
+            _ => "Connected",
+        };
+        float tx = x + pad + bs + 14 * s, tw = (float)r.Right - pad - tx;
+        var titleF = Text(15 * s, Microsoft.UI.Text.FontWeights.SemiBold);
+        var subF = Text(12.5f * s, Microsoft.UI.Text.FontWeights.Normal);
+        ds.DrawText(title, new Rect(tx, y + 17 * s, tw, 22 * s), W(1), titleF);
+        ds.DrawText(status, new Rect(tx, y + 39 * s, tw, 20 * s), W(0.55f), subF);
+
+        // Value row: big number + gauge, left-aligned under the badge; the settings button sits at the right.
+        float rowY = y + 82 * s, rowH = 44 * s;
+        var big = Text(28 * s, Microsoft.UI.Text.FontWeights.SemiBold, CanvasVerticalAlignment.Center);
+        switch (e.Kind)
+        {
+            case HudKind.Power:
+            case HudKind.Saver:
+            {
+                int pct = PowerManager.RemainingChargePercent;
+                DrawCapsule(ds, new Rect(x + pad, rowY + 12 * s, 52 * s, 22 * s), s, pct / 100f, c, charging, a);
+                Fonts.DrawTabular(ds, $"{pct}%", new Rect(x + pad + 64 * s, rowY, 100 * s, rowH), W(1), big);
+                break;
+            }
+            case HudKind.Bluetooth when e.Level >= 0:
+                DrawCapsule(ds, new Rect(x + pad, rowY + 12 * s, 52 * s, 22 * s), s, e.Level, c, false, a);
+                Fonts.DrawTabular(ds, e.Value, new Rect(x + pad + 64 * s, rowY, 100 * s, rowH), W(1), big);
+                break;
+            case HudKind.Bluetooth: // the device doesn't report its battery
+                ds.DrawText("Battery level not reported", new Rect(x + pad, rowY, 170 * s, rowH), W(0.4f), Text(12 * s, Microsoft.UI.Text.FontWeights.Normal, CanvasVerticalAlignment.Center));
+                break;
+            case HudKind.Wifi:
+            {
+                int bars = (int)MathF.Round(Math.Clamp(e.Level, 0, 1) * 5);
+                for (int i = 0; i < 5; i++)
+                {
+                    float bh = (8 + i * 6) * s, bx = x + pad + i * 11 * s, by = rowY + 38 * s;
+                    ds.FillRoundedRectangle(bx, by - bh, 7 * s, bh, 2.5f * s, 2.5f * s, i < bars ? Tint(c, a) : W(0.16f));
+                }
+                ds.DrawText(Signal(e.Level), new Rect(x + pad + 64 * s, rowY, 130 * s, rowH), W(1), Text(22 * s, Microsoft.UI.Text.FontWeights.SemiBold, CanvasVerticalAlignment.Center));
+                break;
+            }
+        }
+        DrawButton(ds, Button(r, s), s, e.Kind switch { HudKind.Power or HudKind.Saver => "Battery settings", HudKind.Bluetooth => "Bluetooth settings", _ => "Wi-Fi settings" }, a);
+    }
+
+    static string Signal(float level) => level switch { >= 0.8f => "Excellent", >= 0.6f => "Strong", >= 0.4f => "Good", _ => "Weak" };
+
+    static Color Tint(Color c, float a) => ColorHelper.FromArgb((byte)Math.Clamp(a * 255, 0, 255), c.R, c.G, c.B);
+
+    static CanvasTextFormat Text(float size, Windows.UI.Text.FontWeight weight, CanvasVerticalAlignment v = CanvasVerticalAlignment.Top) => Fonts.Shared(new()
+    {
+        FontFamily = Fonts.Inter(weight), FontSize = size, FontWeight = weight, VerticalAlignment = v,
+        WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character, TrimmingSign = CanvasTrimmingSign.Ellipsis,
+    });
+
+    /// <summary>Tinted circle with the glyph (as on the built-in app notifications); <paramref name="pulse"/> adds a still halo ring while charging.</summary>
+    static void Badge(CanvasDrawingSession ds, Rect r, float s, string glyph, Color c, float a, bool pulse)
+    {
+        float cx = (float)(r.X + r.Width / 2), cy = (float)(r.Y + r.Height / 2), rad = (float)r.Width / 2;
+        if (pulse)
+        {
+            ds.DrawCircle(cx, cy, rad + 5 * s, Tint(c, 0.3f * a), 1.5f * s);
+        }
+        ds.FillCircle(cx, cy, rad, Tint(c, 0.22f * a));
+        ds.DrawCircle(cx, cy, rad - 0.5f * s, Tint(c, 0.35f * a), 1 * s);
+        using var f = new CanvasTextFormat { FontFamily = "Segoe Fluent Icons", FontSize = rad * 0.9f, HorizontalAlignment = CanvasHorizontalAlignment.Center, VerticalAlignment = CanvasVerticalAlignment.Center };
+        ds.DrawText(glyph, r, Tint(c, a), f);
+    }
+
+    /// <summary>A battery capsule: outline, terminal nub, fill to <paramref name="level"/>; a bolt over it while charging.</summary>
+    static void DrawCapsule(CanvasDrawingSession ds, Rect r, float s, float level, Color c, bool charging, float a)
+    {
+        level = Math.Clamp(level, 0, 1);
+        float rad = (float)r.Height * 0.3f, inset = 2.5f * s;
+        var fill = level <= 0.2f && !charging ? ColorHelper.FromArgb(255, 255, 90, 80) : c;
+        ds.DrawRoundedRectangle(r, rad, rad, ColorHelper.FromArgb((byte)(110 * a), 255, 255, 255), 1.5f * s);
+        ds.FillRoundedRectangle((float)r.Right + 2 * s, (float)(r.Y + r.Height * 0.32), 2.5f * s, (float)r.Height * 0.36f, 1 * s, 1 * s, ColorHelper.FromArgb((byte)(110 * a), 255, 255, 255));
+        var inner = new Rect(r.X + inset, r.Y + inset, Math.Max(0, (r.Width - 2 * inset) * level), r.Height - 2 * inset);
+        if (inner.Width > 0) ds.FillRoundedRectangle(inner, rad * 0.6f, rad * 0.6f, Tint(fill, a));
+        if (!charging) return;
+        using var bolt = new CanvasTextFormat { FontFamily = "Segoe Fluent Icons", FontSize = (float)r.Height * 0.75f, HorizontalAlignment = CanvasHorizontalAlignment.Center, VerticalAlignment = CanvasVerticalAlignment.Center };
+        ds.DrawText("\uE945", r, ColorHelper.FromArgb((byte)(255 * a), 255, 255, 255), bolt);
+    }
+
+    static string PowerEstimate(bool charging)
+    {
+        try
+        {
+            if (!charging)
+            {
+                var left = PowerManager.RemainingDischargeTime;
+                return left > TimeSpan.Zero && left < TimeSpan.FromDays(2) ? $"About {Hm(left)} left" : "On battery";
+            }
+            var report = Windows.Devices.Power.Battery.AggregateBattery.GetReport();
+            if (report.FullChargeCapacityInMilliwattHours is int full && report.RemainingCapacityInMilliwattHours is int now && report.ChargeRateInMilliwatts is int rate && rate > 0)
+                return $"About {Hm(TimeSpan.FromHours((full - now) / (double)rate))} to full";
+        }
+        catch { }
+        return charging ? "Plugged in" : "On battery";
+    }
+
+    static string Hm(TimeSpan t) => t.TotalHours >= 1 ? $"{(int)t.TotalHours} h {t.Minutes} min" : $"{Math.Max(1, t.Minutes)} min";
+
+    public static void DrawButton(CanvasDrawingSession ds, Rect b, float s, string text, float a)
+    {
+        ds.FillRoundedRectangle(b, (float)b.Height / 2, (float)b.Height / 2, ColorHelper.FromArgb((byte)(34 * a), 255, 255, 255));
+        var f = Fonts.Shared(new CanvasTextFormat { FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.Medium), FontSize = 12 * s, FontWeight = Microsoft.UI.Text.FontWeights.Medium, HorizontalAlignment = CanvasHorizontalAlignment.Center, VerticalAlignment = CanvasVerticalAlignment.Center, WordWrapping = CanvasWordWrapping.NoWrap });
+        ds.DrawText(text, b, ColorHelper.FromArgb((byte)(235 * a), 255, 255, 255), f);
+    }
+
     public static void Draw(CanvasDrawingSession ds, Rect r, float s, HudEvent e, float a)
     {
         float x = (float)r.X, cy = (float)(r.Y + r.Height / 2), right = (float)r.Right - 14 * s;
@@ -162,13 +732,13 @@ static class HudView
             FontFamily = "Segoe Fluent Icons", FontSize = 16 * s,
             HorizontalAlignment = CanvasHorizontalAlignment.Center, VerticalAlignment = CanvasVerticalAlignment.Center,
         };
-        ds.DrawText(e.Glyph, new Rect(x + 8 * s, cy - 14 * s, 28 * s, 28 * s), tint, icon);
-        using var label = new CanvasTextFormat
+        if (e.Text.Length == 0) ds.DrawText(e.Glyph, new Rect(x + 8 * s, cy - 14 * s, 28 * s, 28 * s), tint, icon); // notices draw a badge instead
+        var label = Fonts.Shared(new CanvasTextFormat
         {
-            FontFamily = "Segoe UI Variable Text", FontSize = 13 * s, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.SemiBold), FontSize = 13 * s, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             VerticalAlignment = CanvasVerticalAlignment.Center,
             WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character,
-        };
+        });
         float left = x + 44 * s;
 
         if (e.Text.Length == 0) // level bar (volume, brightness)
@@ -181,20 +751,35 @@ static class HudView
             return;
         }
 
-        // Notice: text on the left, value + level ring on the right.
-        float ringR = 8 * s, ringX = right - ringR;
-        float valueW = e.Value.Length > 0 ? 38 * s : 0, ringW = e.Level >= 0 ? 2 * ringR + 8 * s : 0;
-        ds.DrawText(e.Text, new Rect(left, cy - 12 * s, right - left - valueW - ringW, 24 * s), white, label);
-        if (e.Value.Length > 0)
-            ds.DrawText(e.Value, new Rect(right - ringW - valueW, cy - 12 * s, valueW, 24 * s), white, label);
+        // Notice (battery, Bluetooth, Wi-Fi): glyph badge, name + status, a small gauge on the right.
+        var c = e.Tint ?? ColorHelper.FromArgb(255, 150, 180, 255);
+        bool charging = e.Kind == HudKind.Power && e.Text == "Charging";
+        float bs = 36 * s;
+        Badge(ds, new Rect(x + 12 * s, cy - bs / 2, bs, bs), s, e.Glyph, c, a, pulse: charging);
+        float tx = x + 60 * s, gaugeW = e.Kind == HudKind.Wifi ? 30 * s : e.Level >= 0 ? 74 * s : 0;
+        var name = Text(13.5f * s, Microsoft.UI.Text.FontWeights.SemiBold);
+        var status = Text(11.5f * s, Microsoft.UI.Text.FontWeights.Normal);
+        string line = e.Detail ?? e.Kind switch { HudKind.Power => charging ? "Plugged in" : e.Text == "On battery" ? "Unplugged" : "Plug in soon", HudKind.Saver => e.Text.EndsWith("on") ? "Battery lasts longer" : "Full performance", HudKind.Bluetooth => "Connected", _ => $"{Signal(e.Level)} signal" };
+        ds.DrawText(e.Text, new Rect(tx, cy - 18 * s, right - tx - gaugeW - 8 * s, 20 * s), white, name);
+        ds.DrawText(line, new Rect(tx, cy + 1 * s, right - tx - gaugeW - 8 * s, 18 * s), ColorHelper.FromArgb((byte)(150 * a), 255, 255, 255), status);
+        if (e.Kind == HudKind.Wifi)
+        {
+            int bars = (int)MathF.Round(Math.Clamp(e.Level, 0, 1) * 5);
+            for (int i = 0; i < 5; i++)
+            {
+                float bh = (5 + i * 3.5f) * s, bx = right - 30 * s + i * 6 * s;
+                ds.FillRoundedRectangle(bx, cy + 9 * s - bh, 4 * s, bh, 1.5f * s, 1.5f * s, i < bars ? Tint(c, a) : track);
+            }
+            return;
+        }
         if (e.Level < 0) return;
-        ds.DrawCircle(ringX, cy, ringR, track, 2.5f * s);
-        float sweep = MathF.Tau * Math.Clamp(e.Level, 0, 1);
-        using var builder = new CanvasPathBuilder(ds);
-        builder.BeginFigure(ringX, cy - ringR);
-        builder.AddArc(new System.Numerics.Vector2(ringX, cy), ringR, ringR, -MathF.PI / 2, sweep);
-        builder.EndFigure(CanvasFigureLoop.Open);
-        using var arc = CanvasGeometry.CreatePath(builder);
-        ds.DrawGeometry(arc, tint, 2.5f * s, new CanvasStrokeStyle { StartCap = CanvasCapStyle.Round, EndCap = CanvasCapStyle.Round });
+        DrawCapsule(ds, new Rect(right - 30 * s, cy - 7 * s, 26 * s, 14 * s), s, e.Level, c, charging, a);
+        var pct = Fonts.Shared(new CanvasTextFormat
+        {
+            FontFamily = Fonts.Inter(Microsoft.UI.Text.FontWeights.SemiBold), FontSize = 13 * s, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            HorizontalAlignment = CanvasHorizontalAlignment.Right, VerticalAlignment = CanvasVerticalAlignment.Center,
+            WordWrapping = CanvasWordWrapping.NoWrap, TrimmingGranularity = CanvasTextTrimmingGranularity.Character, TrimmingSign = CanvasTrimmingSign.Ellipsis,
+        });
+        Fonts.DrawTabular(ds, e.Value, new Rect(right - 78 * s, cy - 12 * s, 42 * s, 24 * s), white, pct);
     }
 }

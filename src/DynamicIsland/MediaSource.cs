@@ -57,6 +57,21 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
         }
     }
 
+    /// <summary>The synced lyric lines of the current song (empty when there are none).</summary>
+    public IReadOnlyList<(TimeSpan At, string Text)> Lyrics => _lyrics;
+
+    /// <summary>Index into <see cref="Lyrics"/> of the line for the current position, -1 before the first.</summary>
+    public int LyricIndex
+    {
+        get
+        {
+            var pos = Position;
+            int i = -1;
+            for (int k = 0; k < _lyrics.Count && _lyrics[k].At <= pos; k++) i = k;
+            return i;
+        }
+    }
+
     public double Progress
     {
         get
@@ -69,6 +84,12 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
     TimeSpan Position => _position + (Playing ? DateTimeOffset.Now - _positionAt : TimeSpan.Zero);
 
     public async void Start()
+    {
+        try { await StartCore(); }
+        catch (Exception ex) { Crash.Log("Start", ex); } // async void: an escaping exception would kill the app
+    }
+
+        async Task StartCore()
     {
         try
         {
@@ -102,6 +123,21 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
             Process.Start(new ProcessStartInfo("explorer.exe", $"shell:AppsFolder\\{id}") { UseShellExecute = true });
         }
         catch (Exception ex) { Debug.WriteLine($"Couldn't open {id}: {ex.Message}"); }
+    }
+
+    /// <summary>The playing app's window (the one <see cref="OpenApp"/> brings forward), or 0. Enumerates windows: call off the UI thread.</summary>
+    public nint Window(string title) => _session?.SourceAppUserModelId is { Length: > 0 } id ? FindWindow(id, title) : 0;
+
+    /// <summary>True when the playing app accepts seeking.</summary>
+    public bool CanSeek => _end > TimeSpan.Zero && _session?.GetPlaybackInfo()?.Controls?.IsPlaybackPositionEnabled == true;
+
+    /// <summary>Jumps to <paramref name="fraction"/> of the track.</summary>
+    public void Seek(double fraction)
+    {
+        if (!CanSeek) return;
+        var target = TimeSpan.FromTicks((long)(_end.Ticks * Math.Clamp(fraction, 0, 1)));
+        _ = _session!.TryChangePlaybackPositionAsync(target.Ticks);
+        (_position, _positionAt) = (target, DateTimeOffset.Now); // show it right away; the app's timeline update follows
     }
 
     void Post(Action a) => ui.TryEnqueue(() => a());
@@ -144,6 +180,12 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
     }
 
     async void RefreshProps()
+    {
+        try { await RefreshPropsCore(); }
+        catch (Exception ex) { Crash.Log("RefreshProps", ex); } // async void: an escaping exception would kill the app
+    }
+
+        async Task RefreshPropsCore()
     {
         var session = _session;
         string title = "", artist = "";
@@ -233,6 +275,7 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
                 catch { mine = false; }
                 appIds[pid] = mine;
             }
+            if (!mine) mine = Native.WindowAppId(hwnd) == id; // Store apps (Media Player, ...): the ApplicationFrameHost frame names its app
             if (mine && hasTitle) { titled = hwnd; return false; }
             if (hasTitle && titledAny == 0) titledAny = hwnd;
             if (mine && any == 0) any = hwnd; // windows enumerate front to back, so this is the app's most recent window
@@ -241,7 +284,7 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
         return titled != 0 ? titled : any != 0 ? any : titledAny;
     }
 
-    static string? AppIdOf(Process p)
+    internal static string? AppIdOf(Process p)
     {
         try
         {
@@ -253,7 +296,10 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
     }
 
     /// <summary>The most vivid colour in the art (scaled to 8×8), brightened, so the glow reads on dark and light screens.</summary>
-    Windows.UI.Color AccentOf(CanvasBitmap art)
+    Windows.UI.Color AccentOf(CanvasBitmap art) => AccentOf(device, art);
+
+    /// <summary>The image's most vibrant colour, softened toward grey (album glow, notification app tint).</summary>
+    internal static Windows.UI.Color AccentOf(CanvasDevice device, CanvasBitmap art)
     {
         using var small = new CanvasRenderTarget(device, 8, 8, 96);
         using (var ds = small.CreateDrawingSession()) ds.DrawImage(art, new Windows.Foundation.Rect(0, 0, 8, 8), art.Bounds);
