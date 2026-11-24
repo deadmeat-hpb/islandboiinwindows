@@ -41,7 +41,7 @@ sealed class SystemHud(DispatcherQueue ui)
     int _lowAnnounced = 101;
     PowerSupplyStatus _supply;
     EnergySaverStatus _saver;
-    DateTime _powerChangedAt;
+    DateTime _powerChangedAt, _outputChangedAt;
     internal static readonly Windows.UI.Color SaverGreen = ColorHelper.FromArgb(255, 130, 215, 90);
 
     /// <summary>The battery glyph for a charge level (Segoe Fluent Battery0..Battery10).</summary>
@@ -56,7 +56,7 @@ sealed class SystemHud(DispatcherQueue ui)
     {
         // Follow switches to buds/headphones. WinRT event, not NAudio's IMMNotificationClient: that COM callback crashed the runtime
         // (access violation in coreclr) whenever a Bluetooth headset changed state.
-        try { Windows.Media.Devices.MediaDevice.DefaultAudioRenderDeviceChanged += (_, e) => { if (e.Role == Windows.Media.Devices.AudioDeviceRole.Default) ui.TryEnqueue(AttachSpeakers); }; }
+        try { Windows.Media.Devices.MediaDevice.DefaultAudioRenderDeviceChanged += (_, e) => { if (e.Role == Windows.Media.Devices.AudioDeviceRole.Default) ui.TryEnqueue(() => { _outputChangedAt = DateTime.Now; AttachSpeakers(); }); }; }
         catch (Exception ex) { Debug.WriteLine($"Audio device notifications unavailable: {ex}"); }
         AttachSpeakers();
 
@@ -131,7 +131,12 @@ sealed class SystemHud(DispatcherQueue ui)
             _speakers?.Dispose();
             _speakers = (_devices ??= new MMDeviceEnumerator()).GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
             _speakers.AudioEndpointVolume.OnVolumeNotification += d =>
+            {
+                // Buds sync their own volume to Windows right after they connect: that's not the user, and the volume bar
+                // it raised replaced the "Connected" pop-up the moment it appeared.
+                if ((DateTime.Now - _outputChangedAt).TotalSeconds < 4) return;
                 Raise(new(d.Muted ? "\uE74F" : "\uE767", d.Muted ? 0 : d.MasterVolume, "", Settings: "ms-settings:sound"));
+            };
         }
         catch (Exception ex) { Debug.WriteLine($"Volume unavailable: {ex}"); }
     }
@@ -145,6 +150,8 @@ sealed class SystemHud(DispatcherQueue ui)
             _bluetooth = DeviceInformation.CreateWatcher(aqs, ["System.Devices.Aep.IsConnected", "System.Devices.Aep.ContainerId"], DeviceInformationKind.AssociationEndpoint);
             _bluetooth.Added += (_, d) => ui.TryEnqueue(() => OnBluetooth(d.Id, d.Name, d.Properties));
             _bluetooth.Updated += (_, u) => ui.TryEnqueue(() => OnBluetooth(u.Id, null, u.Properties));
+            // We never stop it: a stop means Windows aborted it (sleep, the radio switched off), and it would stay deaf until relaunch.
+            _bluetooth.Stopped += (_, _) => ui.TryEnqueue(async () => { await Task.Delay(5000); StartBluetooth(); });
             _bluetooth.Start();
         }
         catch (Exception ex) { Debug.WriteLine($"Bluetooth watcher unavailable: {ex}"); }
