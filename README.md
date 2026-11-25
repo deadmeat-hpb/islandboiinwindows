@@ -1,6 +1,6 @@
-# islandboiinwindows
+# Delos
 
-A Dynamic Island for Windows, with an Apple Liquid Glass look.
+Delos (named for Apollo's floating island) is a Dynamic Island for Windows, with an Apple Liquid Glass look.
 
 ## What it does
 
@@ -23,7 +23,7 @@ A Dynamic Island for Windows, with an Apple Liquid Glass look.
 - Full-screen captures (Win+PrtScn) saved to PicturesScreenshots get the screenshot island too (one island per capture; click it to open the image).
 - Tailored designs: messages (sender + bubble), mail (sender, subject, preview), calendar (time + countdown), calls, browser push (site), screenshots (the snip as a thumbnail), Logitech G HUB DPI, and a generic card.
 - Built-in Windows apps get their own glyph badge in the app's colour: Clock alarms and timers (still halo rings, the time or "Time's up" large, held up to 30 seconds), Windows Security (green Protected / red Action needed), Windows Update (Restart required), Microsoft Store (Installed / Updated), Game Bar clips and screenshots, Phone Link messages and calls, Microsoft To Do reminders as calendar cards, and Windows system toasts: USB drives (AutoPlay), low disk space, printing, Bluetooth pairing, OneDrive, Windows Backup, new startup apps, audio and Wi-Fi. Snipping Tool screen recordings get the recording design. Badge cards size themselves to their text.
-- `DynamicIsland.exe --preview <folder>` renders every notification design to PNG and exits (the island hides itself from screenshots). Windows only gives the island a notification's text and app icon, so images inside toasts, toast buttons and inline replies aren't available.
+- `Delos.exe --preview <folder>` renders every notification design to PNG and exits (the island hides itself from screenshots). Windows only gives the island a notification's text and app icon, so images inside toasts, toast buttons and inline replies aren't available.
 - Volume (card: slider, mute, switch output device), brightness (laptop panels), charging / unplugged / battery low, energy saver on / off, Bluetooth connected and Wi-Fi connected drop down as a badge pill (battery capsule, device battery, signal bars); click it for its card with the value large and a settings button.
 - Microphone and camera: while an app uses them, a still dot sits at the end of the bar (orange for the microphone, green for the camera, as on the iPhone), and the app that starts gets a short pill; click it for the privacy page. It reads the same registry record as the taskbar's microphone icon and only wakes when that changes.
 - Calls: while Zoom, Teams, Google Meet (in a browser) or Discord holds the microphone, the island rests as a call pill with the app and the call's length (one redraw a second). Click it to bring the call back; right-click hides it until the next call.
@@ -34,7 +34,7 @@ A Dynamic Island for Windows, with an Apple Liquid Glass look.
 
 ## Settings
 
-Dynamic Island lives in the taskbar's hidden icons (the ^ arrow). Click the icon, or open the app again while it runs, to open Settings; right-click it for Settings, Hide island and Quit. Settings is a normal Windows 11 window with five pages, and every change saves at once (%LOCALAPPDATA%\DynamicIslandData\settings.json) and applies live:
+Delos lives in the taskbar's hidden icons (the ^ arrow). Click the icon, or open the app again while it runs, to open Settings; right-click it for Settings, Hide island and Quit. Settings is a dark Windows 11 window in the look of the Apollo EQ app (raised glass cards, gold hairlines, Palatino titles, Inter text) with five pages, and every change saves at once (%LOCALAPPDATA%\DelosData\settings.json) and applies live:
 
 - **General**: start with Windows or only when opened, show or hide the island, quit, reset all settings.
 - **Island behaviour**: switch each island on or off (music, notifications, screenshots, volume and brightness, battery, Bluetooth, Wi-Fi, microphone and camera, Caps Lock, Copied, calls, downloads, Focus and airplane mode); clock or slim resting bar; notification time (3, 5 or 8 s); over full-screen apps: pop-ups, only the bar, or hidden; the drop animation from the music player or Clock; Clock timers on or off.
@@ -51,7 +51,7 @@ cd src/DynamicIsland
 dotnet build -c Release -p:Platform=x64 -r win-x64
 ```
 
-The app is self-contained for the Windows App SDK; run `bin\x64\Release\net8.0-windows10.0.26100.0\win-x64\DynamicIsland.exe`. It starts at sign-in (unless switched off in Settings) and restarts after a crash. Quit it from the tray icon. On the laptop a scheduled task "DynamicIsland Restart" also relaunches it when Windows logs a crash (Application Error 1000), which covers crashes in the first minute; errors are logged to %LOCALAPPDATA%DynamicIslandDataash.log.
+The app is self-contained for the Windows App SDK; run `bin\x64\Release\net8.0-windows10.0.26100.0\win-x64\Delos.exe`. It starts at sign-in (unless switched off in Settings) and restarts after a crash. Quit it from the tray icon. On the laptop a scheduled task "Delos Restart" also relaunches it when Windows logs a crash (Application Error 1000), which covers crashes in the first minute; errors are logged to %LOCALAPPDATA%\DelosData\crash.log. The app used to be called Dynamic Island: on its first start Delos moves the old settings and position, removes the old "DynamicIsland" startup entry and deletes the old copy in %LOCALAPPDATA%\DynamicIsland.
 
 Unsigned builds are blocked while Windows Smart App Control is on.
 

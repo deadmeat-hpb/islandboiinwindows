@@ -51,7 +51,7 @@ sealed class Tray : IDisposable
         AppendMenu(menu, 0, CmdSettings, "Settings");
         AppendMenu(menu, 0, CmdToggle, Settings.Current.ShowIsland ? "Hide island" : "Show island");
         AppendMenu(menu, 0x800 /* MF_SEPARATOR */, 0, null);
-        AppendMenu(menu, 0, CmdQuit, "Quit Dynamic Island");
+        AppendMenu(menu, 0, CmdQuit, "Quit Delos");
         SetMenuDefaultItem(menu, CmdSettings, 0);
 
         // The island window never activates (WS_EX_NOACTIVATE), but a tray menu only closes on an outside click when its
@@ -80,7 +80,7 @@ sealed class Tray : IDisposable
             hWnd = _hwnd, uID = 1,
             uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP,
             uCallbackMessage = WM_APP_TRAY, hIcon = _icon,
-            szTip = "Dynamic Island",
+            szTip = "Delos",
         };
         return d;
     }

@@ -42,7 +42,7 @@ sealed class MediaSource(CanvasDevice device, DispatcherQueue ui)
     public event Action? Changed;
 
     List<(TimeSpan At, string Text)> _lyrics = [];
-    static readonly HttpClient Http = new() { DefaultRequestHeaders = { { "User-Agent", "DynamicIsland/0.1" } }, Timeout = TimeSpan.FromSeconds(8) };
+    static readonly HttpClient Http = new() { DefaultRequestHeaders = { { "User-Agent", "Delos/0.1" } }, Timeout = TimeSpan.FromSeconds(8) };
     sealed record LrcResult([property: JsonPropertyName("syncedLyrics")] string? SyncedLyrics);
 
     /// <summary>The synced lyric line for the current position, or "" when there are none.</summary>

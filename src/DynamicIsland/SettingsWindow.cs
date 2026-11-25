@@ -1,49 +1,88 @@
 using System.Diagnostics;
+using Microsoft.UI;
+using Microsoft.UI.Text;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Windows.Foundation;
 using Windows.Graphics;
+using Windows.UI;
+using Windows.UI.Text;
 
 namespace DynamicIsland;
 
 /// <summary>
-/// The Settings app, opened from the tray icon (or by launching Dynamic Island again). A normal Windows 11 window:
-/// Mica, a sidebar of pages, and setting cards. Built only while open; closing it frees it.
+/// The Settings app, opened from the tray icon (or by launching Delos again). Dark, warm and quiet, in the look of the
+/// Apollo EQ app: a gallery-dark backdrop over Mica (the wallpaper tints through like old glass), cards that sit slightly
+/// raised from it (neumorphism done with bevelled borders, not shadows), gold hairlines, Palatino for titles and Inter for
+/// everything you read. Every brush is static: no blur, no shadows, no animation beyond the controls' own, so the window
+/// costs no more to draw than a plain one. Built only while open; closing it frees it.
 /// Every control writes through <see cref="Settings.Update"/>, which saves and applies at once.
 /// </summary>
 public sealed class SettingsWindow : Window
 {
+    // Palette (Apollo's): warm ivory ink on near-black teal, with an old-gold accent.
+    static readonly Color Ink = C(0xFFEFE8D8), Ink2 = C(0xFFA8A293), Ink3 = C(0xFF7C786D);
+    static readonly Color Gold = C(0xFFD6B46E), GoldDim = C(0xFFB89A5C), Caution = C(0xFFD9A066);
+    static readonly Color Base = C(0xFF0D1112);
+
+    static readonly FontFamily Inter = new("ms-appx:///Fonts/Inter-Regular.ttf#Inter");
+    static readonly FontFamily InterMedium = new("ms-appx:///Fonts/Inter-Medium.ttf#Inter");
+    static readonly FontFamily InterSemiBold = new("ms-appx:///Fonts/Inter-SemiBold.ttf#Inter");
+    static readonly FontFamily Serif = new("Palatino Linotype, Book Antiqua, Georgia"); // Zapf's Renaissance-born roman, shipped with Windows
+
     readonly NavigationView _nav;
     readonly ScrollViewer _scroll;
 
     public SettingsWindow()
     {
-        Title = "Dynamic Island";
+        Title = "Delos";
         SystemBackdrop = new MicaBackdrop();
         ExtendsContentIntoTitleBar = true;
         string icon = Path.Combine(AppContext.BaseDirectory, "Assets", "Island.ico");
         try { AppWindow.SetIcon(icon); } catch (Exception ex) { Debug.WriteLine($"No window icon: {ex.Message}"); }
+        var bar = AppWindow.TitleBar;
+        bar.ButtonBackgroundColor = bar.ButtonInactiveBackgroundColor = Colors.Transparent;
+        bar.ButtonForegroundColor = Ink2;
+        bar.ButtonInactiveForegroundColor = Ink3;
+        bar.ButtonHoverBackgroundColor = C(0x14FFF4DC);
+        bar.ButtonHoverForegroundColor = Ink;
+        bar.ButtonPressedBackgroundColor = C(0x0AFFF4DC);
+        bar.ButtonPressedForegroundColor = Ink;
 
-        var titleBar = new StackPanel { Orientation = Orientation.Horizontal, Height = 44, Padding = new Thickness(16, 0, 0, 0), Spacing = 12 };
-        titleBar.Children.Add(new Microsoft.UI.Xaml.Controls.Image { Width = 16, Height = 16, VerticalAlignment = VerticalAlignment.Center, Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(icon)) });
-        titleBar.Children.Add(new TextBlock { Text = "Dynamic Island", VerticalAlignment = VerticalAlignment.Center, Style = Res<Style>("CaptionTextBlockStyle") });
+        var titleBar = new Grid { Height = 44 }; // empty, draggable strip; the name sits in the sidebar
 
-        _scroll = new ScrollViewer { Padding = new Thickness(36, 8, 36, 36) };
+        _scroll = new ScrollViewer { Padding = new Thickness(40, 0, 40, 40) };
         _nav = new NavigationView
         {
             IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed,
             IsSettingsVisible = false,
             IsPaneToggleButtonVisible = false,
             PaneDisplayMode = NavigationViewPaneDisplayMode.Left,
-            OpenPaneLength = 230,
+            OpenPaneLength = 240,
             Content = _scroll,
+            FontFamily = Inter,
+            PaneHeader = Brand(),
         };
         foreach (var (tag, glyph, text) in Pages)
-            _nav.MenuItems.Add(new NavigationViewItem { Content = text, Tag = tag, Icon = new FontIcon { Glyph = glyph } });
+            _nav.MenuItems.Add(new NavigationViewItem { Content = text, Tag = tag, FontFamily = Inter, Icon = new FontIcon { Glyph = glyph, FontSize = 15 } });
         _nav.SelectionChanged += (_, e) => { if (e.SelectedItem is NavigationViewItem { Tag: string tag }) Show(tag); };
 
-        var root = new Grid { RowDefinitions = { new() { Height = GridLength.Auto }, new() { Height = new GridLength(1, GridUnitType.Star) } } };
+        var root = new Grid
+        {
+            RequestedTheme = ElementTheme.Dark,
+            RowDefinitions = { new() { Height = GridLength.Auto }, new() { Height = new GridLength(1, GridUnitType.Star) } },
+        };
+        Restyle(root.Resources);
+        // The backdrop: a dark varnish over the Mica, with a faint warm light from the upper left, like a lit canvas.
+        var varnish = new Border { Background = Linear(C(0xE6121718), C(0xF2090C0D), new Point(0, 0), new Point(1, 1)) };
+        var light = new Border { Background = new RadialGradientBrush
+        {
+            Center = new Point(0.18, 0.0), GradientOrigin = new Point(0.18, 0.0), RadiusX = 0.75, RadiusY = 0.6,
+            GradientStops = { new GradientStop { Color = C(0x16D6B46E), Offset = 0 }, new GradientStop { Color = C(0x00D6B46E), Offset = 1 } },
+        } };
+        foreach (var layer in new[] { varnish, light }) { Grid.SetRowSpan(layer, 2); root.Children.Add(layer); }
         root.Children.Add(titleBar);
         Grid.SetRow(_nav, 1);
         root.Children.Add(_nav);
@@ -56,7 +95,7 @@ public sealed class SettingsWindow : Window
 
         // Sized and centred on the screen it opens on.
         float scale = Native.GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96f;
-        var size = new SizeInt32((int)(900 * scale), (int)(660 * scale));
+        var size = new SizeInt32((int)(940 * scale), (int)(680 * scale));
         var area = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary).WorkArea;
         AppWindow.MoveAndResize(new RectInt32(area.X + (area.Width - size.Width) / 2, area.Y + (area.Height - size.Height) / 2, size.Width, size.Height));
     }
@@ -80,24 +119,30 @@ public sealed class SettingsWindow : Window
     void Show(string tag)
     {
         _sync.Clear();
-        var page = new StackPanel { Spacing = 4, MaxWidth = 1000, HorizontalAlignment = HorizontalAlignment.Stretch };
-        page.Children.Add(new TextBlock { Text = Pages.First(p => p.Tag == tag).Text, Style = Res<Style>("TitleTextBlockStyle"), Margin = new Thickness(0, 4, 0, 20) });
+        var page = new StackPanel { Spacing = 10, MaxWidth = 1000, HorizontalAlignment = HorizontalAlignment.Stretch };
+        page.Children.Add(new TextBlock
+        {
+            Text = Pages.First(p => p.Tag == tag).Text, FontFamily = Serif, FontStyle = FontStyle.Italic, FontSize = 32,
+            Foreground = new SolidColorBrush(Ink), Margin = new Thickness(2, 6, 0, 0),
+        });
+        page.Children.Add(Rule(new Thickness(0, 4, 0, 14)));
         switch (tag)
         {
             case "general":
-                page.Children.Add(Card("", "Start with Windows", "On: the island opens when you sign in. Off: it only runs when you open Dynamic Island yourself.",
+                page.Children.Add(Card("", "Start with Windows", "On: the island opens when you sign in. Off: it only runs when you open Delos yourself.",
                     Toggle(s => s.StartWithWindows, (s, v) => s.StartWithWindows = v)));
                 page.Children.Add(Card("", "Show the island", "Turn the island off without quitting. The icon stays in the hidden icons so you can bring it back.",
                     Toggle(s => s.ShowIsland, (s, v) => s.ShowIsland = v)));
-                var quit = new Button { Content = "Quit" };
+                var quit = PlainButton("Quit");
                 quit.Click += (_, _) => App.Quit();
-                page.Children.Add(Card("", "Quit Dynamic Island", "Closes the island and its icon until you open the app again.", quit));
-                var resetAll = new Button { Content = "Reset" };
+                page.Children.Add(Card("", "Quit Delos", "Closes the island and its icon until you open the app again.", quit));
+                var resetAll = PlainButton("Reset");
                 resetAll.Click += async (_, _) =>
                 {
                     var ask = new ContentDialog
                     {
-                        XamlRoot = Content.XamlRoot, Title = "Reset all settings?", Content = "Every page goes back to how Dynamic Island came. The island's position stays.",
+                        XamlRoot = Content.XamlRoot, RequestedTheme = ElementTheme.Dark, FontFamily = Inter,
+                        Title = "Reset all settings?", Content = "Every page goes back to how Delos came. The island's position stays.",
                         PrimaryButtonText = "Reset", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Close,
                     };
                     if (await ask.ShowAsync() == ContentDialogResult.Primary) Settings.ResetAll();
@@ -117,9 +162,9 @@ public sealed class SettingsWindow : Window
                 page.Children.Add(Card("", "Microphone and camera", "A dot on the island while an app uses them, and which app when it starts.", Toggle(s => s.Privacy, (s, v) => s.Privacy = v)));
                 page.Children.Add(Card("", "Caps Lock", "Caps Lock turning on or off.", Toggle(s => s.CapsLock, (s, v) => s.CapsLock = v)));
                 page.Children.Add(Card("", "Copied", "What you copy, in one line. Private copies from password managers are never shown.", Toggle(s => s.Clipboard, (s, v) => s.Clipboard = v)));
-                page.Children.Add(Card("\uE896", "Downloads", "A file finishing in Downloads; click it to see the file in its folder.", Toggle(s => s.Downloads, (s, v) => s.Downloads = v)));
-                page.Children.Add(Card("\uE717", "Calls", "Zoom, Teams, Google Meet and Discord calls stay in the island with their length; click to go back to the call.", Toggle(s => s.Calls, (s, v) => s.Calls = v)));
-                page.Children.Add(Card("\uE709", "Focus and airplane mode", "A Focus session starting or ending, and airplane mode on or off.", Toggle(s => s.FocusAirplane, (s, v) => s.FocusAirplane = v)));
+                page.Children.Add(Card("", "Downloads", "A file finishing in Downloads; click it to see the file in its folder.", Toggle(s => s.Downloads, (s, v) => s.Downloads = v)));
+                page.Children.Add(Card("", "Calls", "Zoom, Teams, Google Meet and Discord calls stay in the island with their length; click to go back to the call.", Toggle(s => s.Calls, (s, v) => s.Calls = v)));
+                page.Children.Add(Card("", "Focus and airplane mode", "A Focus session starting or ending, and airplane mode on or off.", Toggle(s => s.FocusAirplane, (s, v) => s.FocusAirplane = v)));
                 page.Children.Add(Card("", "Clock timers", "Minimise Clock while a timer or the stopwatch runs and it keeps counting in the island.", Toggle(s => s.ClockTimers, (s, v) => s.ClockTimers = v)));
                 page.Children.Add(Section("Behaviour"));
                 page.Children.Add(Card("", "Resting island", "What the island shows when nothing is happening.",
@@ -143,7 +188,7 @@ public sealed class SettingsWindow : Window
                 page.Children.Add(Card("", "Time format", null, Choice(["24-hour", "12-hour"], s => s.Clock24h ? 0 : 1, (s, i) => s.Clock24h = i == 0)));
                 page.Children.Add(Card("", "Show the date", "Beside the time on the resting island.", Toggle(s => s.ShowDate, (s, v) => s.ShowDate = v)));
                 page.Children.Add(Section("Position"));
-                var reset = new Button { Content = "Reset" };
+                var reset = PlainButton("Reset");
                 reset.Click += (_, _) => IslandWindow.Current?.ResetPosition();
                 page.Children.Add(Card("", "Centre the island", "Moves it back to the middle of the top edge. You can also drag it.", reset));
                 break;
@@ -158,17 +203,20 @@ public sealed class SettingsWindow : Window
                 break;
 
             case "about":
-                var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16, Margin = new Thickness(0, 0, 0, 16) };
-                head.Children.Add(new Microsoft.UI.Xaml.Controls.Image { Width = 56, Height = 56, Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(Path.Combine(AppContext.BaseDirectory, "Assets", "Island.ico"))) });
-                var name = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-                name.Children.Add(new TextBlock { Text = "Dynamic Island", Style = Res<Style>("SubtitleTextBlockStyle") });
-                name.Children.Add(new TextBlock { Text = $"Version {typeof(App).Assembly.GetName().Version?.ToString(3)}", Foreground = Res<Brush>("TextFillColorSecondaryBrush") });
+                var head = new Grid { ColumnSpacing = 20, Margin = new Thickness(0, 0, 0, 8), ColumnDefinitions = { new() { Width = GridLength.Auto }, new() { Width = new GridLength(1, GridUnitType.Star) } } };
+                var seal = Well(72, new Microsoft.UI.Xaml.Controls.Image { Width = 40, Height = 40, Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(Path.Combine(AppContext.BaseDirectory, "Assets", "Island.ico"))) });
+                head.Children.Add(seal);
+                var name = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2 };
+                name.Children.Add(new TextBlock { Text = "DELOS", FontFamily = Serif, FontSize = 28, CharacterSpacing = 420, Foreground = new SolidColorBrush(Ink) });
+                name.Children.Add(new TextBlock { Text = "the floating island of Apollo", FontFamily = Serif, FontStyle = FontStyle.Italic, FontSize = 15, Foreground = new SolidColorBrush(GoldDim) });
+                name.Children.Add(new TextBlock { Text = $"Version {typeof(App).Assembly.GetName().Version?.ToString(3)}", FontFamily = Inter, FontSize = 12, Foreground = new SolidColorBrush(Ink3), Margin = new Thickness(0, 6, 0, 0) });
+                Grid.SetColumn(name, 1);
                 head.Children.Add(name);
-                page.Children.Add(head);
-                var log = new Button { Content = "Open folder" };
+                page.Children.Add(Panel(head, new Thickness(20, 18, 20, 18)));
+                var log = PlainButton("Open folder");
                 log.Click += (_, _) => Open(Settings.Dir);
                 page.Children.Add(Card("", "Crash log and settings file", "Where the island writes errors and keeps your settings.", log));
-                var source = new HyperlinkButton { Content = "GitHub", NavigateUri = new Uri("https://github.com/deadmeat-hpb/islandboiinwindows") };
+                var source = new HyperlinkButton { Content = "GitHub", FontFamily = InterMedium, NavigateUri = new Uri("https://github.com/deadmeat-hpb/delos") };
                 page.Children.Add(Card("", "Source code", null, source));
                 break;
         }
@@ -182,11 +230,72 @@ public sealed class SettingsWindow : Window
         catch (Exception ex) { Debug.WriteLine($"Couldn't open {path}: {ex.Message}"); }
     }
 
-    static T Res<T>(string key) => (T)Application.Current.Resources[key];
+    static Color C(uint argb) => Color.FromArgb((byte)(argb >> 24), (byte)(argb >> 16), (byte)(argb >> 8), (byte)argb);
 
-    static TextBlock Section(string text) => new() { Text = text, Style = Res<Style>("BodyStrongTextBlockStyle"), Margin = new Thickness(0, 20, 0, 6) };
+    static LinearGradientBrush Linear(Color from, Color to, Point start, Point end) => new()
+    {
+        StartPoint = start, EndPoint = end,
+        GradientStops = { new GradientStop { Color = from, Offset = 0 }, new GradientStop { Color = to, Offset = 1 } },
+    };
 
-    /// <summary>A Windows 11 settings card: icon, title and description on the left, the control on the right.</summary>
+    /// <summary>The sidebar's head: the name in spaced Roman capitals over an italic line, like a title page.</summary>
+    static FrameworkElement Brand()
+    {
+        var s = new StackPanel { Margin = new Thickness(22, 2, 16, 18), Spacing = 0 };
+        s.Children.Add(new TextBlock { Text = "DELOS", FontFamily = Serif, FontSize = 22, CharacterSpacing = 480, Foreground = new SolidColorBrush(Ink) });
+        s.Children.Add(new TextBlock { Text = "island settings", FontFamily = Serif, FontStyle = FontStyle.Italic, FontSize = 14, Foreground = new SolidColorBrush(GoldDim), Margin = new Thickness(1, -2, 0, 0) });
+        return s;
+    }
+
+    /// <summary>A gold hairline that fades out at both ends.</summary>
+    static Border Rule(Thickness margin) => new()
+    {
+        Height = 1, Margin = margin,
+        Background = new LinearGradientBrush
+        {
+            StartPoint = new Point(0, 0), EndPoint = new Point(1, 0),
+            GradientStops =
+            {
+                new GradientStop { Color = C(0x00D6B46E), Offset = 0 },
+                new GradientStop { Color = C(0x66D6B46E), Offset = 0.3 },
+                new GradientStop { Color = C(0x00D6B46E), Offset = 1 },
+            },
+        },
+    };
+
+    static FrameworkElement Section(string text)
+    {
+        var s = new StackPanel { Margin = new Thickness(2, 22, 0, 2), Spacing = 8 };
+        s.Children.Add(new TextBlock { Text = text.ToUpperInvariant(), FontFamily = InterSemiBold, FontWeight = FontWeights.SemiBold, FontSize = 11, CharacterSpacing = 160, Foreground = new SolidColorBrush(GoldDim) });
+        return s;
+    }
+
+    /// <summary>
+    /// A raised panel: a faintly translucent dark glass face, lit along its top-left edge and shaded along its bottom-right,
+    /// so it reads as sculpted out of the backdrop. Borders only, no shadow surfaces.
+    /// </summary>
+    static Border Panel(UIElement child, Thickness padding) => new()
+    {
+        Child = child,
+        Background = Linear(C(0x8C283032), C(0x8C101516), new Point(0.2, 0), new Point(0.8, 1)),
+        BorderBrush = Linear(C(0x2EFFF4DC), C(0x80000000), new Point(0, 0), new Point(1, 1)),
+        BorderThickness = new Thickness(1),
+        CornerRadius = new CornerRadius(14),
+        Padding = padding,
+    };
+
+    /// <summary>A round well pressed into the panel (the bevel reversed), holding an icon.</summary>
+    static Border Well(double size, UIElement child) => new()
+    {
+        Width = size, Height = size, CornerRadius = new CornerRadius(size / 2),
+        Background = Linear(C(0xFF0E1314), C(0xFF1A2122), new Point(0, 0), new Point(1, 1)),
+        BorderBrush = Linear(C(0x99000000), C(0x24FFF4DC), new Point(0, 0), new Point(1, 1)),
+        BorderThickness = new Thickness(1),
+        VerticalAlignment = VerticalAlignment.Center,
+        Child = child,
+    };
+
+    /// <summary>A setting card: icon in a well, title and description, the control on the right.</summary>
     static Border Card(string glyph, string title, string? description, FrameworkElement control)
     {
         var grid = new Grid
@@ -194,11 +303,11 @@ public sealed class SettingsWindow : Window
             ColumnSpacing = 16,
             ColumnDefinitions = { new() { Width = GridLength.Auto }, new() { Width = new GridLength(1, GridUnitType.Star) }, new() { Width = GridLength.Auto } },
         };
-        var icon = new FontIcon { Glyph = glyph, FontSize = 20, VerticalAlignment = VerticalAlignment.Center };
-        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        text.Children.Add(new TextBlock { Text = title, TextWrapping = TextWrapping.Wrap });
+        var icon = Well(38, new FontIcon { Glyph = glyph, FontSize = 16, Foreground = new SolidColorBrush(Ink2), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
+        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2 };
+        text.Children.Add(new TextBlock { Text = title, TextWrapping = TextWrapping.Wrap, FontFamily = InterMedium, FontWeight = FontWeights.Medium, FontSize = 14, Foreground = new SolidColorBrush(Ink) });
         if (description is not null)
-            text.Children.Add(new TextBlock { Text = description, TextWrapping = TextWrapping.Wrap, Style = Res<Style>("CaptionTextBlockStyle"), Foreground = Res<Brush>("TextFillColorSecondaryBrush") });
+            text.Children.Add(new TextBlock { Text = description, TextWrapping = TextWrapping.Wrap, FontFamily = Inter, FontSize = 12, LineHeight = 17, Foreground = new SolidColorBrush(Ink2) });
         control.VerticalAlignment = VerticalAlignment.Center;
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(control, title); // screen readers say "Liquid glass", not "On"
         control.Margin = new Thickness(8, 0, 0, 0);
@@ -207,16 +316,67 @@ public sealed class SettingsWindow : Window
         grid.Children.Add(icon);
         grid.Children.Add(text);
         grid.Children.Add(control);
-        return new Border
-        {
-            Child = grid,
-            Background = Res<Brush>("CardBackgroundFillColorDefaultBrush"),
-            BorderBrush = Res<Brush>("CardStrokeColorDefaultBrush"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(6),
-            Padding = new Thickness(16, 12, 16, 12),
-            MinHeight = 68,
-        };
+        var card = Panel(grid, new Thickness(14, 12, 18, 12));
+        card.MinHeight = 66;
+        return card;
+    }
+
+    static Button PlainButton(string text) => new() { Content = text, FontFamily = InterMedium, MinWidth = 96, Padding = new Thickness(16, 6, 16, 7), CornerRadius = new CornerRadius(10) };
+
+    /// <summary>
+    /// Lightweight styling: the stock controls keep their behaviour and accessibility, only their colours change.
+    /// Gold where Windows would use the accent colour, ivory for text, and soft insets for fields and buttons.
+    /// </summary>
+    static void Restyle(ResourceDictionary r)
+    {
+        void Set(Color color, params string[] keys) { var b = new SolidColorBrush(color); foreach (var k in keys) r[k] = b; }
+
+        // Sidebar and content area: let the backdrop through.
+        Set(Colors.Transparent, "NavigationViewDefaultPaneBackground", "NavigationViewExpandedPaneBackground", "NavigationViewTopPaneBackground",
+            "NavigationViewContentBackground", "NavigationViewContentGridBorderBrush");
+        Set(Gold, "NavigationViewSelectionIndicatorForeground");
+        Set(Ink2, "NavigationViewItemForeground");
+        Set(Ink, "NavigationViewItemForegroundPointerOver", "NavigationViewItemForegroundSelected", "NavigationViewItemForegroundSelectedPointerOver",
+            "NavigationViewItemForegroundPressed", "NavigationViewItemForegroundSelectedPressed");
+        Set(C(0x0DFFF4DC), "NavigationViewItemBackgroundPointerOver", "NavigationViewItemBackgroundSelected");
+        Set(C(0x14FFF4DC), "NavigationViewItemBackgroundSelectedPointerOver");
+        Set(C(0x08FFF4DC), "NavigationViewItemBackgroundPressed", "NavigationViewItemBackgroundSelectedPressed");
+
+        // Toggles: an old-gold track when on, a dark knob; a quiet ivory outline when off.
+        Set(GoldDim, "ToggleSwitchFillOn", "ToggleSwitchFillOnPressed");
+        Set(Gold, "ToggleSwitchFillOnPointerOver");
+        Set(Colors.Transparent, "ToggleSwitchStrokeOn", "ToggleSwitchStrokeOnPointerOver", "ToggleSwitchStrokeOnPressed");
+        Set(Base, "ToggleSwitchKnobFillOn", "ToggleSwitchKnobFillOnPointerOver", "ToggleSwitchKnobFillOnPressed");
+        Set(C(0x330A0E0F), "ToggleSwitchFillOff", "ToggleSwitchFillOffPressed");
+        Set(C(0x14FFF4DC), "ToggleSwitchFillOffPointerOver");
+        Set(C(0x59EFE8D8), "ToggleSwitchStrokeOff", "ToggleSwitchStrokeOffPressed");
+        Set(C(0x8CEFE8D8), "ToggleSwitchStrokeOffPointerOver");
+        Set(Ink2, "ToggleSwitchKnobFillOff", "ToggleSwitchKnobFillOffPressed");
+        Set(Ink, "ToggleSwitchKnobFillOffPointerOver");
+        Set(Ink2, "ToggleSwitchContentForeground", "ToggleSwitchHeaderForeground");
+
+        // Fields and buttons: sunk a little into the card.
+        Set(C(0x59080B0C), "ComboBoxBackground", "ButtonBackground");
+        Set(C(0x80080B0C), "ComboBoxBackgroundPointerOver", "ButtonBackgroundPointerOver");
+        Set(C(0xA6080B0C), "ComboBoxBackgroundPressed", "ButtonBackgroundPressed");
+        Set(C(0x1FFFF4DC), "ComboBoxBorderBrush", "ButtonBorderBrush");
+        Set(C(0x33FFF4DC), "ComboBoxBorderBrushPointerOver", "ButtonBorderBrushPointerOver");
+        Set(C(0x14FFF4DC), "ComboBoxBorderBrushPressed", "ButtonBorderBrushPressed");
+        Set(Ink, "ComboBoxForeground", "ComboBoxForegroundPointerOver", "ComboBoxForegroundPressed", "ButtonForeground", "ButtonForegroundPointerOver");
+        Set(Ink2, "ButtonForegroundPressed", "ComboBoxDropDownGlyphForeground");
+        Set(C(0xF2161C1D), "ComboBoxDropDownBackground");
+        Set(C(0x1FFFF4DC), "ComboBoxDropDownBorderBrush");
+        Set(Gold, "ComboBoxItemPillFillBrush");
+
+        Set(Gold, "HyperlinkButtonForeground");
+        Set(Ink, "HyperlinkButtonForegroundPointerOver");
+        Set(GoldDim, "HyperlinkButtonForegroundPressed");
+
+        // Anything else that reaches for the accent (focus, dialogs' primary button) gets the gold too.
+        r["AccentFillColorDefaultBrush"] = new SolidColorBrush(GoldDim);
+        r["AccentFillColorSecondaryBrush"] = new SolidColorBrush(Gold);
+        r["AccentFillColorTertiaryBrush"] = new SolidColorBrush(C(0xFF9E8450));
+        r["TextOnAccentFillColorPrimaryBrush"] = new SolidColorBrush(Base);
     }
 
     // Controls on the open page follow changes made elsewhere (the tray menu's Hide island, Reset): each registers how to
@@ -233,7 +393,7 @@ public sealed class SettingsWindow : Window
 
     ToggleSwitch Toggle(Func<Settings, bool> get, Action<Settings, bool> set)
     {
-        var t = new ToggleSwitch { IsOn = get(Settings.Current), OnContent = "On", OffContent = "Off", MinWidth = 0 };
+        var t = new ToggleSwitch { IsOn = get(Settings.Current), OnContent = "On", OffContent = "Off", MinWidth = 0, FontFamily = Inter };
         t.Toggled += (_, _) => { if (!_syncing && t.IsOn != get(Settings.Current)) Settings.Update(s => set(s, t.IsOn)); };
         _sync.Add(() => { if (t.IsOn != get(Settings.Current)) t.IsOn = get(Settings.Current); });
         return t;
@@ -241,7 +401,7 @@ public sealed class SettingsWindow : Window
 
     ComboBox Choice(string[] items, Func<Settings, int> get, Action<Settings, int> set)
     {
-        var c = new ComboBox { MinWidth = 170 };
+        var c = new ComboBox { MinWidth = 180, FontFamily = Inter, CornerRadius = new CornerRadius(10) };
         foreach (var i in items) c.Items.Add(i);
         c.SelectedIndex = get(Settings.Current);
         c.SelectionChanged += (_, _) => { if (!_syncing && c.SelectedIndex >= 0 && c.SelectedIndex != get(Settings.Current)) Settings.Update(s => set(s, c.SelectedIndex)); };
@@ -252,7 +412,7 @@ public sealed class SettingsWindow : Window
     /// <summary>A note under a card that shows only while <paramref name="text"/> returns something, e.g. why the glass is solid.</summary>
     TextBlock Note(Func<string?> text)
     {
-        var t = new TextBlock { TextWrapping = TextWrapping.Wrap, Style = Res<Style>("CaptionTextBlockStyle"), Foreground = Res<Brush>("SystemFillColorCautionBrush"), Margin = new Thickness(56, 2, 16, 6) };
+        var t = new TextBlock { TextWrapping = TextWrapping.Wrap, FontFamily = Inter, FontStyle = FontStyle.Normal, FontSize = 12, Foreground = new SolidColorBrush(Caution), Margin = new Thickness(70, -2, 16, 4) };
         void Refresh() { string? s = text(); t.Text = s ?? ""; t.Visibility = s is null ? Visibility.Collapsed : Visibility.Visible; }
         Refresh();
         _sync.Add(Refresh);

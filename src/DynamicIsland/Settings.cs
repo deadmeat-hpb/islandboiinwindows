@@ -8,7 +8,7 @@ enum IslandSize { Small, Default, Large }
 enum AnimationLevel { Full, Reduced, Off }
 
 /// <summary>
-/// The user's choices from the Settings app. Saved as JSON in %LOCALAPPDATA%\DynamicIslandData\settings.json and applied
+/// The user's choices from the Settings app. Saved as JSON in %LOCALAPPDATA%\DelosData\settings.json and applied
 /// live: the island reads <see cref="Current"/> when it needs a value and listens to <see cref="Changed"/> for the few
 /// that need work (size, visibility, startup).
 /// </summary>
@@ -55,7 +55,7 @@ sealed class Settings
 
     [System.Text.Json.Serialization.JsonIgnore] public float SizeScale => Size switch { IslandSize.Small => 0.85f, IslandSize.Large => 1.15f, _ => 1f };
 
-    public static readonly string Dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DynamicIslandData");
+    public static readonly string Dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DelosData");
     static readonly string File_ = Path.Combine(Dir, "settings.json");
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true, Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() } };
 
@@ -110,8 +110,8 @@ sealed class Settings
         try
         {
             using var run = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
-            if (Current.StartWithWindows) run.SetValue("DynamicIsland", $"\"{Environment.ProcessPath}\"");
-            else run.DeleteValue("DynamicIsland", throwOnMissingValue: false);
+            if (Current.StartWithWindows) run.SetValue("Delos", $"\"{Environment.ProcessPath}\"");
+            else run.DeleteValue("Delos", throwOnMissingValue: false);
         }
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Autostart unavailable: {ex.Message}"); }
     }

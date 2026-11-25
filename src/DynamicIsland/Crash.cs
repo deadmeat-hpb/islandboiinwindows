@@ -3,12 +3,12 @@ using System.Diagnostics;
 namespace DynamicIsland;
 
 /// <summary>
-/// Writes errors with their stack to %LOCALAPPDATA%\DynamicIsland\crash.log (outside the install folder, which installs
+/// Writes errors with their stack to %LOCALAPPDATA%\DelosData\crash.log (outside the install folder, which installs
 /// replace). One bad frame or callback must never take the island down: callers catch, log here, and carry on.
 /// </summary>
 static class Crash
 {
-    static readonly string LogFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DynamicIslandData", "crash.log");
+    static readonly string LogFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DelosData", "crash.log");
     static readonly object Gate = new();
     static string _last = "";
     static int _repeats;

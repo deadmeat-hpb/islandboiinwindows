@@ -22,8 +22,8 @@ public partial class App : Application
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         if (Preview.TryRun()) { Exit(); return; } // design previews to PNG, then quit (see Preview.cs)
-        _single = new Mutex(true, "DynamicIsland.SingleInstance", out bool first);
-        _showSettings = new EventWaitHandle(false, EventResetMode.AutoReset, "DynamicIsland.ShowSettings");
+        _single = new Mutex(true, "Delos.SingleInstance", out bool first);
+        _showSettings = new EventWaitHandle(false, EventResetMode.AutoReset, "Delos.ShowSettings");
         if (!first) // already running: opening the app again opens its Settings
         {
             _showSettings.Set();
@@ -31,6 +31,7 @@ public partial class App : Application
             return;
         }
 
+        Migration.Run(); // the old "Dynamic Island" name: settings, position, autostart, old copy
         Settings.Load();
         Settings.ApplyStartup(); // Start with Windows (on by default) = the HKCU Run value
         Native.RegisterApplicationRestart(null, 0); // Windows relaunches it after a crash or hang

@@ -6,7 +6,7 @@ using Microsoft.UI;
 namespace DynamicIsland;
 
 /// <summary>
-/// `DynamicIsland.exe --preview <folder>` renders every notification design (pill and card) to PNGs and exits.
+/// `Delos.exe --preview <folder>` renders every notification design (pill and card) to PNGs and exits.
 /// The island hides itself from screen capture, so screenshots can't show it; this is how designs get reviewed.
 /// </summary>
 static class Preview
@@ -43,7 +43,7 @@ static class Preview
         ("startup", new IslandNotification("Settings", "New startup app", "TIDAL is set to run when you sign in.", null, "Windows.SystemToast.StartupApp", At: DateTime.Now)),
         ("snip-record", new IslandNotification("Snipping Tool", "Screen recording saved", "Saved to Videos\\Screen Recordings", null, "Microsoft.ScreenSketch_8wekyb3d8bbwe!App", At: DateTime.Now)),
         ("claude-done", new IslandNotification("Claude", "Claude finished", "I updated the island to the newest build and pushed it to GitHub.", null, "AnthropicPBC.Claude_fnn82j28hfe8t!Claude", At: DateTime.Now)),
-        ("claude-input", new IslandNotification("Claude", "Claude needs your permission", "Allow running dotnet build in islandboiinwindows?", null, "AnthropicPBC.Claude_fnn82j28hfe8t!Claude", At: DateTime.Now)),
+        ("claude-input", new IslandNotification("Claude", "Claude needs your permission", "Allow running dotnet build in delos?", null, "AnthropicPBC.Claude_fnn82j28hfe8t!Claude", At: DateTime.Now)),
         ("outlook", new IslandNotification("Outlook", "Sarah Chen", "Q4 budget review\nHi, could you take a look at the attached numbers before Friday's meeting?", null, "Microsoft.OutlookForWindows_8wekyb3d8bbwe!Microsoft.OutlookforWindows", At: DateTime.Now)),
         ("todo",new IslandNotification("Microsoft To Do", "Reminder: Submit report", "Today 17:00", null, "Microsoft.Todos_8wekyb3d8bbwe!App", ColorHelper.FromArgb(255, 80, 140, 255), DateTime.Now)),
     ];

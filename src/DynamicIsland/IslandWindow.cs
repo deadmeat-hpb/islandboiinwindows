@@ -25,8 +25,7 @@ public sealed class IslandWindow : Window
     enum Mode { Idle, Hover, Compact, Hud, Notify, Expanded }
 
     const float StripDip = 300, CanvasDip = 640; // 300: room for the tallest card (screenshot) plus the media pill stacked under it. The canvas is island-sized, not full-width: each redraw costs ~1/4 as much
-    static readonly string PosFile = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DynamicIsland", "position.txt");
+    static readonly string PosFile = Path.Combine(Settings.Dir, "position.txt");
 
     readonly nint _hwnd;
     readonly Grid _root;
