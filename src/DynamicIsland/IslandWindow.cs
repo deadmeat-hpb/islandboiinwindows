@@ -462,7 +462,7 @@ public sealed class IslandWindow : Window
         // frozen in energy saver.
         bool battery = PowerManager.PowerSupplyStatus == PowerSupplyStatus.NotPresent && PowerManager.BatteryStatus != BatteryStatus.NotPresent;
         var set = Settings.Current;
-        bool glass = Settings.GlassActive(out _);
+        bool glass = Settings.GlassActive(out _) && !_fullscreen; // over a game the backdrop changes every frame: a 1-4 Hz snapshot lags and lands in the wrong place, so the island goes solid
         if (glass != _useGlass) { _useGlass = glass; _lastCapture = 0; _dirty = true; }
         double rate = set.Power == PowerMode.Quality ? 0.5 : 1; // Quality refreshes the glass twice as often
         double captureEvery = (animating ? 1 / 30.0 : _mode is Mode.Idle or Mode.Hover ? 1.0 : 0.25) * (battery ? 2 : 1) * rate;
