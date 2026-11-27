@@ -421,11 +421,15 @@ public sealed class IslandWindow : Window
         if (now - _lastFullscreenCheck > 1 && _flow?.IsPlaying != true) // fullscreen games, videos and presentations: never hide, just stay the idle bar (our own flow overlay doesn't count)
         {
             _lastFullscreenCheck = now;
+            bool was = _fullscreen;
             // D3D exclusive full screen and presentations always count; "busy" (a window covering the screen) only when it's an app.
             _fullscreen = Native.SHQueryUserNotificationState(out int state) == 0 && (state is 3 or 4 || state == 2 && AppFillsScreen());
+            // Going full screen: back to the bar, keeping (unless switched off) a call or timer pill. Clicks can open it again from there.
+            if (_fullscreen && !was && _mode != Mode.Idle && (Quiet || _mode is Mode.Hover or Mode.Expanded || _mode == Mode.Compact && !(CallOn || TimerOn))) { _pinned = false; SetMode(Mode.Idle); }
+            // A game that is itself always-on-top sits above us in the topmost band: step back in front of it, without taking focus.
+            if (_fullscreen && _visible) Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
         }
-        // Full screen: the bar, plus (unless switched off) notifications, notices and a call or timer pill; nothing opened by hovering or clicking.
-        if (_fullscreen && _mode != Mode.Idle && (Quiet || _mode is Mode.Hover or Mode.Expanded || _mode == Mode.Compact && !(CallOn || TimerOn))) { _pinned = false; SetMode(Mode.Idle); }
+        if (Quiet && _mode is Mode.Notify or Mode.Hud) SetMode(Mode.Idle); // "Only the slim bar": no pop-ups over full-screen apps
 
         // Hidden (Settings, tray menu, or full screen with "Hide the island"): the window goes away and only this check runs, twice a second.
         bool show = Settings.Current.ShowIsland && !(_fullscreen && Settings.Current.HideInFullscreen);
@@ -445,7 +449,7 @@ public sealed class IslandWindow : Window
 
         if ((Native.GetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE) & Native.WS_EX_TOPMOST) == 0) // the shell can drop us out of the topmost band; then clicks hit the window below
             Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
-        if (!Quiet) UpdateHover(now);
+        UpdateHover(now);
         // Stacking: while a notification or notice is up, the playing media drops below it as its own pill, then pushes back up.
         bool stacked = (MediaPlaying || _stackOpen) && _mode is Mode.Notify or Mode.Hud;
         _stack.Target = !stacked ? 0 : _leaving ? 6 * _s : _top.Target + _h.Target + 8 * _s; // glides up into the leaving island's place
@@ -531,7 +535,8 @@ public sealed class IslandWindow : Window
         float px = p.X - _monLeft, py = p.Y - _monTop;
         var (cx, top, w, h) = Shape();
         float m = 12 * _s;
-        bool near = !_fullscreen && px >= cx - w / 2 - m && px <= cx + w / 2 + m && py <= top + h + m && py >= -m; // in a game the cursor is the game's
+        // In a game the cursor is the game's: hovering alone doesn't swell the bar, but a pill opened by a click stays while the mouse is on it.
+        bool near = (!_fullscreen || _pinned) && px >= cx - w / 2 - m && px <= cx + w / 2 + m && py <= top + h + m && py >= -m;
 
         if (!near && _mode != Mode.Expanded && now > _holdUntil) _pinned = false;
         if (_mode == Mode.Expanded) { } // stays open until clicked
@@ -540,7 +545,7 @@ public sealed class IslandWindow : Window
             if (near && !_leaving && _noteUntil > 0) _noteUntil = Math.Max(_noteUntil, now + 1); // hovering keeps it open (not once dismissed)
             if ((!near || _noteUntil == 0 || _leaving) && now > _noteUntil && Leave(now)) ShowNextNote(now, near);
         }
-        else if (_notes.Pending.Count > 0) ShowNextNote(now, near);
+        else if (_notes.Pending.Count > 0 && !Quiet) ShowNextNote(now, near);
         else if (_mode == Mode.Hud)
         {
             if (now > _hudUntil && Leave(now)) // the notice slides away; an open media card (stacked or from before) takes the island
@@ -614,7 +619,7 @@ public sealed class IslandWindow : Window
     }
 
     /// <summary>What the island shows when not expanded: the pill after a click until the mouse leaves, else the slim bar (swollen on hover).</summary>
-    Mode RestMode(bool near) => _pinned || TimerOn || CallOn ? Mode.Compact : near ? Mode.Hover : Mode.Idle; // the pill only shows after a click; otherwise the slim bar, even while music plays
+    Mode RestMode(bool near) => _pinned || (TimerOn || CallOn) && !Quiet ? Mode.Compact : near ? Mode.Hover : Mode.Idle; // the pill only shows after a click; otherwise the slim bar, even while music plays
 
     /// <summary>Right click steps back one stage: card → pill → bar. Notices and pop-ups just close.</summary>
     void OnRightClick(float y)
@@ -746,7 +751,6 @@ public sealed class IslandWindow : Window
 
     void OnClick()
     {
-        if (_fullscreen) return; // in a game a click belongs to the game; the pop-ups time out on their own
         var p = new System.Numerics.Vector2(_pressX, _pressY);
         bool onStack = _stack.Value > 2 * _s && _pressY > _stack.Value;
         if (onStack && !_stackOpen) // the stacked media pill opens into the media card in place; the notice above stays a pill
